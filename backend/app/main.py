@@ -5,14 +5,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
-from app.database import init_db
-from app.routes import queries, sources
+from app.database import async_session, init_db
+from app.routes import auth, queries, sources
+from app.services.auth import ensure_bootstrap_admin
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     await init_db()
+    async with async_session() as session:
+        await ensure_bootstrap_admin(session)
     yield
 
 
@@ -31,6 +34,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api")
 app.include_router(sources.router, prefix="/api")
 app.include_router(queries.router, prefix="/api")
 

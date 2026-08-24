@@ -6,7 +6,9 @@
 
 ## 1. Project Overview
 
-**Goal:** Build an AI-powered Business Intelligence platform that lets users connect data sources, ask natural-language questions, and receive charts, tables, and insights.
+**Goal:** Build an AI-powered Business Intelligence platform for **a single business** — connect that business's data sources, ask natural-language questions, and receive charts, tables, and insights.
+
+**Scope:** One deployment, one organization, shared data. No multi-tenant isolation between companies.
 
 **Stack (decided):**
 
@@ -17,7 +19,7 @@
 | ORM | SQLAlchemy 2.x | Mature, async-capable |
 | Frontend | React 18 + Vite + TypeScript | Fast dev, type safety |
 | AI | OpenAI-compatible API | NL → SQL, insight generation |
-| Auth | JWT (Phase 3) | Stateless, API-friendly |
+| Auth | JWT (Phase 3, optional) | Protect the app; single shared workspace |
 
 **Repository layout:**
 
@@ -39,40 +41,31 @@ AI-Business-Intelligence/
 | Field | Value |
 |-------|-------|
 | **Last updated** | 2026-08-24 |
-| **Last agent/session** | Initial build — Phase 1 foundation |
-| **Active phase** | Phase 1 — Foundation |
-| **Phase status** | 🟡 Nearly complete — backend smoke test pending |
-| **Blockers** | Python not installed on dev machine (Windows Store stub only) |
+| **Last agent/session** | Phase 2 validated + Phase 3 auth |
+| **Active phase** | Phase 4 — AI Query Engine |
+| **Phase status** | 🟢 Phase 3 complete |
+| **Blockers** | None |
 
 ### 2.2 What Was Completed
 
-- [x] Created this build plan & handoff document
-- [x] Backend skeleton: FastAPI app, config, database layer
-- [x] Core models: `User`, `DataSource`, `Query`, `Dashboard`
-- [x] API routes: health, data sources (CRUD skeleton), queries (skeleton)
-- [x] Frontend scaffold: Vite + React + TypeScript (build verified)
-- [x] Frontend API client + dashboard shell UI
-- [x] Vite dev proxy to backend (`/api` → `:8000`)
-- [x] `.env.example` with required variables
-- [x] Updated `README.md` with setup instructions
-- [ ] Backend smoke test — **blocked**: install Python 3.11+ first
+- [x] Phase 1 validated: health API, sources CRUD, frontend build
+- [x] Phase 2 validated: upload, MySQL, preview, frontend build
+- [x] Phase 3: JWT login (`POST /api/auth/login`), `/me`, bootstrap admin
+- [x] Phase 3: Protected source/query API routes (401 without token)
+- [x] Phase 3: `user_id` set on create for audit
+- [x] Phase 3: Frontend login gate + Bearer token + logout
 
 ### 2.3 What To Do Next
 
-1. **Install Python 3.11+** (https://python.org/downloads — check "Add to PATH")
-2. **Finish Phase 1 verification**
-   - Run backend: `cd backend && python -m venv .venv && .venv\Scripts\activate && pip install -r requirements.txt && uvicorn app.main:app --reload`
-   - Create MySQL database: `CREATE DATABASE ai_bi;`
-   - Copy `.env.example` → `.env` and set `DATABASE_URL`
-   - Confirm `GET http://localhost:8000/api/health` returns `{"status":"ok"}`
-   - Run frontend: `cd frontend && npm run dev` — UI should show "API Online"
-   - Mark Phase 1 task 1.7 complete in §3
-3. **Begin Phase 2 — Data Layer**
-   - Implement CSV/Excel file upload connector
-   - Add MySQL external connection connector
-   - Build schema introspection service
-   - Wire data preview endpoint
-4. **Update this document** after each sub-task (check boxes, update §2.1 status)
+1. **Sign in** at http://localhost:5173 — default `admin@local.dev` / `admin123`
+2. **Begin Phase 4 — AI Query Engine**
+   - Schema context builder for LLM
+   - NL → SQL generation
+   - Sandbox SQL execution
+   - Chat/query UI
+3. **Update this document** after each sub-task
+
+**Default credentials** (change via `ADMIN_*` env vars): `admin@local.dev` / `admin123`
 
 ### 2.4 Conventions for All Agents
 
@@ -91,6 +84,7 @@ cd backend
 python -m venv .venv
 .venv\Scripts\activate          # Windows
 pip install -r requirements.txt
+pip install -r requirements-phase2.txt   # Phase 2: openpyxl for Excel
 uvicorn app.main:app --reload --port 8000
 
 # Frontend
@@ -117,7 +111,7 @@ See `.env.example`. Minimum for Phase 1:
 
 ## 3. Phase-by-Phase Implementation Plan
 
-### Phase 1 — Foundation 🟡 IN PROGRESS
+### Phase 1 — Foundation ✅ COMPLETE
 
 **Objective:** Runnable monorepo skeleton with health checks, DB models, and empty UI shell.
 
@@ -129,41 +123,41 @@ See `.env.example`. Minimum for Phase 1:
 | 1.4 | Health + data source route skeleton | ✅ Done | `backend/app/routes/` |
 | 1.5 | React + Vite frontend shell | ✅ Done | `frontend/src/` |
 | 1.6 | README setup instructions | ✅ Done | Root `README.md` |
-| 1.7 | End-to-end smoke test | ⬜ Pending | Requires Python 3.11+ install |
+| 1.7 | End-to-end smoke test | ✅ Done | Health, CRUD, frontend build verified |
 
-**Exit criteria:** Backend serves `/api/health`; frontend loads; DB tables created.
-
----
-
-### Phase 2 — Data Layer ⬜ NOT STARTED
-
-**Objective:** Users can connect data sources and preview data.
-
-| # | Task | Status | Notes |
-|---|------|--------|-------|
-| 2.1 | File upload connector (CSV, Excel) | ⬜ | Store in `uploads/`, parse with pandas |
-| 2.2 | MySQL external connector | ⬜ | Connection test + schema introspection |
-| 2.3 | Schema registry service | ⬜ | Tables, columns, types cached in DB |
-| 2.4 | Data preview API (`GET /api/sources/{id}/preview`) | ⬜ | Paginated rows |
-| 2.5 | Frontend: data source management UI | ⬜ | List, add, delete, preview |
-
-**Exit criteria:** Upload a CSV, see schema + first 100 rows in UI.
+**Exit criteria:** Backend serves `/api/health`; frontend loads; DB tables created. ✅
 
 ---
 
-### Phase 3 — Auth & Multi-tenancy ⬜ NOT STARTED
+### Phase 2 — Data Layer ✅ COMPLETE
 
-**Objective:** Secure, user-scoped data access.
+**Objective:** Connect data sources and preview data.
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 3.1 | User registration & login (JWT) | ⬜ | bcrypt password hashing |
-| 3.2 | Auth middleware on all routes | ⬜ | Bearer token |
-| 3.3 | Row-level ownership on data sources | ⬜ | `user_id` FK enforcement |
-| 3.4 | Frontend login/register pages | ⬜ | Token in localStorage |
-| 3.5 | Protected routes | ⬜ | Redirect if unauthenticated |
+| 2.1 | File upload connector (CSV, Excel) | ✅ Done | stdlib csv + openpyxl; `POST /api/sources/upload` |
+| 2.2 | MySQL external connector | ✅ Done | `POST /api/sources/mysql`, test endpoint |
+| 2.3 | Schema registry service | ✅ Done | `backend/app/services/schema_registry.py` |
+| 2.4 | Data preview API | ✅ Done | Paginated `GET /api/sources/{id}/preview` |
+| 2.5 | Frontend: data source management UI | ✅ Done | Upload, MySQL form, list, preview, delete |
 
-**Exit criteria:** Two users cannot see each other's data sources.
+**Exit criteria:** Upload a CSV, see schema + first 100 rows in UI. ✅
+
+---
+
+### Phase 3 — Auth & Access Control ✅ COMPLETE
+
+**Objective:** Login to protect the app. All authenticated users share the same business data.
+
+| # | Task | Status | Notes |
+|---|------|--------|-------|
+| 3.1 | Admin login (JWT) | ✅ Done | Bootstrap admin on empty DB; bcrypt hashing |
+| 3.2 | Auth on API routes | ✅ Done | Bearer token via `get_current_user` |
+| 3.3 | `user_id` on records for audit | ✅ Done | Set on source/query create |
+| 3.4 | Frontend login page | ✅ Done | Token in localStorage |
+| 3.5 | Protected routes | ✅ Done | UI gated; 401 clears session |
+
+**Exit criteria:** Unauthenticated users cannot access protected API routes or UI. ✅
 
 ---
 
@@ -220,6 +214,8 @@ See `.env.example`. Minimum for Phase 1:
 
 | Date | Decision | Rationale |
 |------|----------|-----------|
+| 2026-08-24 | CSV via stdlib (no pandas) | Avoids Python 3.14 build failures; openpyxl for Excel only |
+| 2026-08-24 | Single-business scope (not multi-tenant) | One org per deployment; shared data workspace |
 | 2026-08-24 | FastAPI + React monorepo | AI/ML ecosystem, async API, modern frontend DX |
 | 2026-08-24 | MySQL over PostgreSQL | User runs XAMPP locally |
 | 2026-08-24 | OpenAI-compatible API | Flexible provider swap (OpenAI, Azure, local) |
@@ -231,7 +227,9 @@ See `.env.example`. Minimum for Phase 1:
 
 | Date | Agent/Human | Work Done |
 |------|-------------|-----------|
-| 2026-08-24 | Initial agent | Created build plan, Phase 1 foundation scaffold, frontend build verified |
+| 2026-08-24 | Agent | Phase 2 validated; Phase 3 JWT auth implemented |
+| 2026-08-24 | Agent | Phase 1 validated; Phase 2 data layer implemented |
+| 2026-08-24 | Human | Scoped project to single business (removed multi-tenancy) |
 
 ---
 
