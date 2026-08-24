@@ -5,13 +5,13 @@ import {
   getStoredUser,
   getToken,
   parseSchema,
-  setSession,
   type DataSource,
   type HealthResponse,
   type MySQLConnectionConfig,
   type PreviewResponse,
   type User,
 } from './api/client'
+import { LoginPage } from './pages/LoginPage'
 import './App.css'
 
 const defaultMysql: MySQLConnectionConfig = {
@@ -20,49 +20,6 @@ const defaultMysql: MySQLConnectionConfig = {
   user: 'root',
   password: '',
   database: 'ai_bi',
-}
-
-function LoginForm({ onSuccess }: { onSuccess: (user: User) => void }) {
-  const [email, setEmail] = useState('admin@local.dev')
-  const [password, setPassword] = useState('admin123')
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setBusy(true)
-    setError(null)
-    try {
-      const result = await api.login(email.trim(), password)
-      setSession(result.access_token, result.user)
-      onSuccess(result.user)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="login-page">
-      <form className="card login-card" onSubmit={handleSubmit}>
-        <p className="eyebrow">AI Business Intelligence</p>
-        <h1>Sign in</h1>
-        <p className="subtitle">Single-business workspace. Shared data for your team.</p>
-        {error && <p className="form-error">{error}</p>}
-        <label>
-          Email
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        </label>
-        <label>
-          Password
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        </label>
-        <button type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
-        <p className="hint">Default: admin@local.dev / admin123</p>
-      </form>
-    </div>
-  )
 }
 
 function App() {
@@ -193,18 +150,22 @@ function App() {
   }
 
   if (authChecking) {
-    return <div className="login-page"><p className="muted">Checking session…</p></div>
+    return (
+      <div className="cl-auth-loading">
+        <p className="text-body-md">Checking session…</p>
+      </div>
+    )
   }
 
   if (!user) {
-    return <LoginForm onSuccess={setUser} />
+    return <LoginPage onSuccess={setUser} />
   }
 
   return (
     <div className="app">
       <header className="header">
         <div>
-          <p className="eyebrow">Phase 3 — Auth & Access Control</p>
+          <p className="eyebrow">Cognitive Logic</p>
           <h1>AI Business Intelligence</h1>
           <p className="subtitle">Connect your business data sources and preview records.</p>
         </div>

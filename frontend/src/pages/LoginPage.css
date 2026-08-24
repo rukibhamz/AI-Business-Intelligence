@@ -1,0 +1,506 @@
+/**
+ * Login — forced light theme to match Stitch mockup.
+ * Uses explicit hex so OS dark mode cannot wash out text.
+ */
+
+.cl-login-root {
+  --login-bg: #f8f9fa;
+  --login-surface: #ffffff;
+  --login-surface-container: #edeeef;
+  --login-on-surface: #191c1d;
+  --login-on-surface-variant: #454654;
+  --login-outline: #757686;
+  --login-outline-variant: #c5c5d7;
+  --login-primary: #2036bd;
+  --login-secondary: #4648d4;
+  --login-primary-container: #3e52d5;
+  --login-on-primary: #ffffff;
+  --login-error-container: #ffdad6;
+  --login-on-error-container: #93000a;
+  --login-surface-variant: #e1e3e4;
+
+  display: grid;
+  grid-template-columns: 1fr;
+  height: 100svh;
+  width: 100%;
+  overflow: hidden;
+  background: var(--login-surface);
+  color: var(--login-on-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+/* —— Left —— */
+.cl-login-left {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+  background: var(--login-surface);
+  z-index: 2;
+}
+
+.cl-login-stack {
+  width: 100%;
+  max-width: 28rem;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.cl-login-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  text-align: left;
+}
+
+.cl-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.cl-login-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  background: var(--login-primary);
+  color: var(--login-on-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cl-login-mark .material-symbols-outlined {
+  font-size: 20px;
+}
+
+.cl-login-brand-title {
+  margin: 0;
+  font-family: 'Hanken Grotesk', system-ui, sans-serif;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 40px;
+  letter-spacing: -0.01em;
+  color: var(--login-primary);
+}
+
+.cl-login-welcome {
+  margin: 0 0 8px;
+  font-family: 'Hanken Grotesk', system-ui, sans-serif;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 40px;
+  letter-spacing: -0.01em;
+  color: #191c1d !important; /* beat App.css / dark-mode leaks */
+}
+
+.cl-login-subtitle {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--login-on-surface-variant);
+}
+
+.cl-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.cl-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cl-label {
+  font-family: 'Geist', 'Inter', system-ui, sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--login-on-surface-variant);
+}
+
+.cl-field input[type='email'],
+.cl-password-wrap input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--login-outline-variant);
+  background: var(--login-surface);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--login-on-surface);
+  outline: none;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.cl-field input::placeholder,
+.cl-password-wrap input::placeholder {
+  color: var(--login-outline);
+}
+
+.cl-field input:focus,
+.cl-password-wrap input:focus {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px var(--login-primary);
+}
+
+.cl-password-wrap {
+  position: relative;
+}
+
+.cl-password-wrap input {
+  padding-right: 48px;
+}
+
+.cl-visibility {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--login-outline);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+
+.cl-visibility:hover {
+  color: var(--login-primary);
+}
+
+.cl-visibility .material-symbols-outlined {
+  font-size: 20px;
+}
+
+.cl-login-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.cl-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cl-remember input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--login-primary);
+}
+
+.cl-remember label {
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--login-on-surface-variant);
+  cursor: pointer;
+}
+
+.cl-text-link {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--login-primary);
+  text-decoration: none;
+}
+
+.cl-text-link:hover {
+  color: var(--login-secondary);
+}
+
+.cl-signin-btn {
+  width: 100%;
+  margin-top: 16px;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: var(--login-primary);
+  color: var(--login-on-primary);
+  font-family: 'Hanken Grotesk', system-ui, sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: background 0.15s ease, transform 0.1s ease;
+}
+
+.cl-signin-btn:hover:not(:disabled) {
+  background: var(--login-secondary);
+}
+
+.cl-signin-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.cl-signin-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.cl-signin-btn .arrow {
+  font-size: 20px;
+  transition: transform 0.15s ease;
+}
+
+.cl-signin-btn:hover:not(:disabled) .arrow {
+  transform: translateX(4px);
+}
+
+.cl-login-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--login-error-container);
+  color: var(--login-on-error-container);
+  font-size: 14px;
+}
+
+.cl-login-footer {
+  text-align: center;
+}
+
+.cl-login-footer p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--login-on-surface-variant);
+}
+
+.cl-login-version {
+  text-align: center;
+  padding-top: 8px;
+}
+
+.cl-login-version p {
+  margin: 0;
+  font-family: 'Geist', 'Inter', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--login-outline);
+}
+
+/* —— Right —— */
+.cl-login-right {
+  display: none;
+  position: relative;
+  overflow: hidden;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 32px;
+  background: var(--login-surface-container);
+}
+
+.cl-login-right-grad {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom right,
+    rgba(62, 82, 213, 0.2),
+    #edeeef
+  );
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.cl-login-right-radial {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(32, 54, 189, 0.06), transparent 70%);
+  pointer-events: none;
+}
+
+.cl-teaser {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 520px);
+}
+
+.cl-teaser-card {
+  width: 100%;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid var(--login-outline-variant);
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.04);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cl-teaser-chrome {
+  height: 48px;
+  border-bottom: 1px solid var(--login-outline-variant);
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  gap: 8px;
+  background: rgba(248, 249, 250, 0.9);
+}
+
+.traffic {
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+}
+
+.traffic.red { background: #ffdad6; }
+.traffic.yellow { background: #e1e3e4; }
+.traffic.green { background: #e1e3e4; }
+
+.cl-model-chip {
+  margin-left: auto;
+  background: var(--login-surface-container);
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: 'Geist', 'Inter', system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--login-on-surface-variant);
+}
+
+.cl-teaser-body {
+  position: relative;
+  height: min(42vh, 360px);
+  min-height: 220px;
+  overflow: hidden;
+  background: #0b0e14;
+}
+
+.cl-teaser-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+.cl-teaser-overlay {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  right: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--login-outline-variant);
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  opacity: 0;
+  transform: translateY(12px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.cl-teaser-card:hover .cl-teaser-overlay {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.cl-teaser-overlay-inner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.cl-teaser-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--login-primary-container);
+  color: #dfe0ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.cl-teaser-overlay-title {
+  margin: 0 0 4px;
+  font-family: 'Hanken Grotesk', system-ui, sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  color: #191c1d;
+}
+
+.cl-teaser-overlay-body {
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--login-on-surface-variant);
+}
+
+.cl-teaser-copy {
+  position: relative;
+  z-index: 1;
+  margin-top: 32px;
+  text-align: center;
+  max-width: 28rem;
+}
+
+.cl-teaser-headline {
+  margin: 0 0 8px;
+  font-family: 'Hanken Grotesk', system-ui, sans-serif;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: -0.01em;
+  color: #191c1d;
+}
+
+.cl-teaser-desc {
+  margin: 0;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--login-on-surface-variant);
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}
+
+.material-symbols-outlined.filled {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+}
+
+/* Split layout — show as soon as there's room (not only 1024+) */
+@media (min-width: 900px) {
+  .cl-login-root {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .cl-login-right {
+    display: flex;
+  }
+}
+
+@media (max-width: 899px) {
+  .cl-login-intro {
+    text-align: center;
+  }
+
+  .cl-login-brand {
+    justify-content: center;
+  }
+}

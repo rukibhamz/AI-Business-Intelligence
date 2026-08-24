@@ -41,9 +41,9 @@ AI-Business-Intelligence/
 | Field | Value |
 |-------|-------|
 | **Last updated** | 2026-08-24 |
-| **Last agent/session** | Phase 2 validated + Phase 3 auth |
-| **Active phase** | Phase 4 — AI Query Engine |
-| **Phase status** | 🟢 Phase 3 complete |
+| **Last agent/session** | Ingested Cognitive Logic design system |
+| **Active phase** | UI Design (parallel) + Phase 4 next for features |
+| **Phase status** | Design system ingested — awaiting Login mockup |
 | **Blockers** | None |
 
 ### 2.2 What Was Completed
@@ -54,18 +54,17 @@ AI-Business-Intelligence/
 - [x] Phase 3: Protected source/query API routes (401 without token)
 - [x] Phase 3: `user_id` set on create for audit
 - [x] Phase 3: Frontend login gate + Bearer token + logout
+- [x] Design system **Cognitive Logic** ingested (`docs/DESIGN_SYSTEM.md`, `frontend/src/styles/tokens.css`)
 
 ### 2.3 What To Do Next
 
-1. **Sign in** at http://localhost:5173 — default `admin@local.dev` / `admin123`
-2. **Begin Phase 4 — AI Query Engine**
-   - Schema context builder for LLM
-   - NL → SQL generation
-   - Sandbox SQL execution
-   - Chat/query UI
-3. **Update this document** after each sub-task
+1. **Review Login UI** at http://localhost:5173 (log out if already signed in)
+2. **Upload next screen mockup** (app shell / sidebar recommended)
+3. Feature work remains Phase 4+ — prefer mockup-driven UI while design track is active
 
 **Default credentials** (change via `ADMIN_*` env vars): `admin@local.dev` / `admin123`
+
+**Design reference:** [docs/DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md)
 
 ### 2.4 Conventions for All Agents
 
@@ -214,7 +213,7 @@ See `.env.example`. Minimum for Phase 1:
 
 | Date | Decision | Rationale |
 |------|----------|-----------|
-| 2026-08-24 | CSV via stdlib (no pandas) | Avoids Python 3.14 build failures; openpyxl for Excel only |
+| 2026-08-24 | Cognitive Logic design system | Refined Minimalism; Cobalt Indigo; Hanken/Inter/Geist |
 | 2026-08-24 | Single-business scope (not multi-tenant) | One org per deployment; shared data workspace |
 | 2026-08-24 | FastAPI + React monorepo | AI/ML ecosystem, async API, modern frontend DX |
 | 2026-08-24 | MySQL over PostgreSQL | User runs XAMPP locally |
@@ -227,6 +226,7 @@ See `.env.example`. Minimum for Phase 1:
 
 | Date | Agent/Human | Work Done |
 |------|-------------|-----------|
+| 2026-08-24 | Agent | Ingested Cognitive Logic design system (tokens + docs) |
 | 2026-08-24 | Agent | Phase 2 validated; Phase 3 JWT auth implemented |
 | 2026-08-24 | Agent | Phase 1 validated; Phase 2 data layer implemented |
 | 2026-08-24 | Human | Scoped project to single business (removed multi-tenancy) |

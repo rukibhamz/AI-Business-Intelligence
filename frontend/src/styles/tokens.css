@@ -1,0 +1,194 @@
+/**
+ * Cognitive Logic design tokens
+ * See docs/DESIGN_SYSTEM.md
+ */
+
+:root {
+  /* Colors — Material-style roles */
+  --cl-surface: #f8f9fa;
+  --cl-surface-dim: #d9dadb;
+  --cl-surface-bright: #f8f9fa;
+  --cl-surface-container-lowest: #ffffff;
+  --cl-surface-container-low: #f3f4f5;
+  --cl-surface-container: #edeeef;
+  --cl-surface-container-high: #e7e8e9;
+  --cl-surface-container-highest: #e1e3e4;
+  --cl-on-surface: #191c1d;
+  --cl-on-surface-variant: #454654;
+  --cl-inverse-surface: #2e3132;
+  --cl-inverse-on-surface: #f0f1f2;
+  --cl-outline: #757686;
+  --cl-outline-variant: #c5c5d7;
+  --cl-surface-tint: #3b4fd2;
+  --cl-primary: #2036bd;
+  --cl-on-primary: #ffffff;
+  --cl-primary-container: #3e52d5;
+  --cl-on-primary-container: #d7daff;
+  --cl-inverse-primary: #bbc3ff;
+  --cl-secondary: #4648d4;
+  --cl-on-secondary: #ffffff;
+  --cl-secondary-container: #6063ee;
+  --cl-on-secondary-container: #fffbff;
+  --cl-tertiary: #7e3100;
+  --cl-on-tertiary: #ffffff;
+  --cl-tertiary-container: #a44200;
+  --cl-on-tertiary-container: #ffd3bf;
+  --cl-error: #ba1a1a;
+  --cl-on-error: #ffffff;
+  --cl-error-container: #ffdad6;
+  --cl-on-error-container: #93000a;
+  --cl-primary-fixed: #dfe0ff;
+  --cl-primary-fixed-dim: #bbc3ff;
+  --cl-on-primary-fixed: #000d60;
+  --cl-on-primary-fixed-variant: #1d34ba;
+  --cl-secondary-fixed: #e1e0ff;
+  --cl-secondary-fixed-dim: #c0c1ff;
+  --cl-on-secondary-fixed: #07006c;
+  --cl-on-secondary-fixed-variant: #2f2ebe;
+  --cl-tertiary-fixed: #ffdbcc;
+  --cl-tertiary-fixed-dim: #ffb694;
+  --cl-on-tertiary-fixed: #351000;
+  --cl-on-tertiary-fixed-variant: #7a2f00;
+  --cl-background: #f8f9fa;
+  --cl-on-background: #191c1d;
+  --cl-surface-variant: #e1e3e4;
+
+  /* Practical aliases */
+  --cl-border: #e5e7eb;
+  --cl-border-subtle: #f3f4f6;
+  --cl-canvas: #f9fafb;
+  --cl-cobalt: #3e52d5;
+  --cl-slate-900: #0f172a;
+  --cl-success-bg: #f0fdf4;
+  --cl-success-fg: #15803d;
+  --cl-warning-bg: #fffbeb;
+  --cl-warning-fg: #b45309;
+
+  /* Typography families */
+  --cl-font-metric: 'Hanken Grotesk', system-ui, sans-serif;
+  --cl-font-body: 'Inter', system-ui, sans-serif;
+  --cl-font-label: 'Geist', 'Inter', system-ui, sans-serif;
+
+  /* Radius */
+  --cl-radius-sm: 0.25rem;
+  --cl-radius: 0.5rem;
+  --cl-radius-md: 0.75rem;
+  --cl-radius-lg: 1rem;
+  --cl-radius-xl: 1.5rem;
+  --cl-radius-full: 9999px;
+
+  /* Spacing (4px base) */
+  --cl-space-xs: 4px;
+  --cl-space-sm: 8px;
+  --cl-space-md: 16px;
+  --cl-space-lg: 24px;
+  --cl-space-xl: 40px;
+  --cl-container-max: 1440px;
+  --cl-gutter: 24px;
+  --cl-sidebar-width: 240px;
+
+  /* Elevation */
+  --cl-shadow-level-2: 0 4px 12px rgba(0, 0, 0, 0.05);
+  --cl-ring-active: 0 0 0 2px rgba(62, 82, 213, 0.1);
+
+  /* Legacy aliases used by existing App.css — map to Cognitive Logic */
+  --text: var(--cl-on-surface-variant);
+  --text-h: var(--cl-on-surface);
+  --bg: var(--cl-canvas);
+  --card-bg: var(--cl-surface-container-lowest);
+  --border: var(--cl-border);
+  --code-bg: var(--cl-surface-container-low);
+  --accent: var(--cl-cobalt);
+  --sans: var(--cl-font-body);
+  --mono: var(--cl-font-label);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cl-background: #0b0e14;
+    --cl-canvas: #0b0e14;
+    --cl-on-background: #f0f1f2;
+    --cl-surface-container-lowest: #151922;
+    --cl-on-surface: #f0f1f2;
+    --cl-on-surface-variant: #a8adb8;
+    --cl-border: #2a3140;
+    --cl-border-subtle: #1c2230;
+    --cl-surface-container-low: #1a2030;
+    --cl-surface-variant: #1e2636;
+    --text: var(--cl-on-surface-variant);
+    --text-h: var(--cl-on-surface);
+    --bg: var(--cl-canvas);
+    --card-bg: var(--cl-surface-container-lowest);
+    --border: var(--cl-border);
+    --code-bg: var(--cl-surface-container-low);
+    --accent: var(--cl-inverse-primary);
+  }
+}
+
+/* Type styles */
+.text-metric-lg {
+  font-family: var(--cl-font-metric);
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 56px;
+  letter-spacing: -0.02em;
+  color: var(--cl-on-surface);
+}
+
+@media (max-width: 767px) {
+  .text-metric-lg {
+    font-size: 32px;
+    line-height: 40px;
+  }
+}
+
+.text-metric-md {
+  font-family: var(--cl-font-metric);
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 40px;
+  letter-spacing: -0.01em;
+  color: var(--cl-on-surface);
+}
+
+.text-headline-sm {
+  font-family: var(--cl-font-metric);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--cl-on-surface);
+}
+
+.text-body-md {
+  font-family: var(--cl-font-body);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 24px;
+  color: var(--cl-on-surface-variant);
+}
+
+.text-body-sm {
+  font-family: var(--cl-font-body);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  color: var(--cl-on-surface-variant);
+}
+
+.text-label-caps {
+  font-family: var(--cl-font-label);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--cl-on-surface-variant);
+}
+
+.text-mono-data {
+  font-family: var(--cl-font-label);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--cl-on-surface);
+}

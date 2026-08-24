@@ -1,33 +1,14 @@
-:root {
-  --text: #64748b;
-  --text-h: #0f172a;
-  --bg: #f8fafc;
-  --card-bg: #ffffff;
-  --border: #e2e8f0;
-  --code-bg: #f1f5f9;
-  --accent: #6366f1;
-  --sans: 'Inter', system-ui, sans-serif;
-  --mono: ui-monospace, 'Cascadia Code', monospace;
+@import './styles/tokens.css';
 
-  font-family: var(--sans);
+:root {
+  font-family: var(--cl-font-body);
   line-height: 1.5;
-  color: var(--text);
-  background: var(--bg);
+  color: var(--cl-on-surface-variant);
+  background: var(--cl-canvas);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --text: #94a3b8;
-    --text-h: #f1f5f9;
-    --bg: #0f172a;
-    --card-bg: #1e293b;
-    --border: #334155;
-    --code-bg: #1e293b;
-    --accent: #818cf8;
-  }
+  -moz-osx-font-smoothing: grayscale;
 }
 
 * {
@@ -36,8 +17,19 @@
 
 body {
   margin: 0;
+  min-height: 100svh;
+  background: var(--cl-canvas);
+  color: var(--cl-on-surface-variant);
 }
 
 #root {
   min-height: 100svh;
+}
+
+.app h1,
+.app h2,
+.app h3 {
+  font-family: var(--cl-font-metric);
+  color: var(--cl-on-surface);
+  font-weight: 600;
 }
