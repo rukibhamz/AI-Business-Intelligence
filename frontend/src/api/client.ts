@@ -13,6 +13,17 @@ export interface User {
   email: string
   full_name: string | null
   created_at: string
+  /** "admin" or "member" — admin unlocks Settings and nothing else. */
+  role?: string
+  is_admin?: boolean
+}
+
+/** How this deployment expects people to sign in. */
+export interface AuthConfig {
+  provider: 'supabase' | 'local'
+  supabase_url: string
+  supabase_anon_key: string
+  allow_signup: boolean
 }
 
 export interface TokenResponse {
@@ -392,9 +403,26 @@ export function clearSession() {
   localStorage.removeItem(USER_KEY)
 }
 
+/**
+ * Where the bearer token comes from.
+ *
+ * Local sign-in stores one token and keeps it; Supabase rotates them, so the
+ * auth layer swaps this for a getter that returns the current one rather than
+ * whatever was in storage an hour ago.
+ */
+type TokenSource = () => Promise<string | null>
+
+let tokenSource: TokenSource = async () => getToken()
+let onUnauthorized: () => void = clearSession
+
+export function setTokenSource(source: TokenSource, unauthorized?: () => void) {
+  tokenSource = source
+  if (unauthorized) onUnauthorized = unauthorized
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = new Headers(options?.headers)
-  const token = getToken()
+  const token = await tokenSource()
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
   const res = await fetch(`${API_BASE}${path}`, {
@@ -403,7 +431,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   })
 
   if (res.status === 401) {
-    clearSession()
+    onUnauthorized()
     throw new Error('UNAUTHORIZED')
   }
 
@@ -423,6 +451,7 @@ async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => requestJson<HealthResponse>('/health'),
+  authConfig: () => requestJson<AuthConfig>('/auth/config'),
   login: (email: string, password: string) =>
     requestJson<TokenResponse>('/auth/login', {
       method: 'POST',
@@ -484,7 +513,7 @@ export const api = {
   getQuery: (id: number) => requestJson<QueryRecord>(`/queries/${id}`),
   downloadQueryCsv: async (id: number) => {
     const headers = new Headers()
-    const token = getToken()
+    const token = await tokenSource()
     if (token) headers.set('Authorization', `Bearer ${token}`)
     const res = await fetch(`${API_BASE}/queries/${id}/export`, { headers })
     if (res.status === 401) {

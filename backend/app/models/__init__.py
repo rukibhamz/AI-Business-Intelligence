@@ -13,13 +13,24 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(255))
+    #: Empty for Supabase accounts — their password never reaches this service.
+    hashed_password: Mapped[str] = mapped_column(String(255), default="")
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    #: The Supabase user id (uuid). Present once the account has signed in.
+    supabase_id: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True, nullable=True
+    )
+    #: "admin" or "member". The only thing admin unlocks is Settings.
+    role: Mapped[str] = mapped_column(String(20), default="member")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     data_sources: Mapped[list[DataSource]] = relationship(back_populates="owner")
     queries: Mapped[list[Query]] = relationship(back_populates="user")
     dashboards: Mapped[list[Dashboard]] = relationship(back_populates="owner")
+
+    @property
+    def is_admin(self) -> bool:
+        return (self.role or "member").strip().lower() == "admin"
 
 
 class DataSource(Base):

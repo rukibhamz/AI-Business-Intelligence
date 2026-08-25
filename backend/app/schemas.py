@@ -28,6 +28,24 @@ class UserResponse(BaseModel):
     email: str
     full_name: str | None
     created_at: datetime
+    #: "admin" or "member". Admin unlocks Settings and nothing else.
+    role: str = "member"
+    #: Convenience for the UI, so it does not have to know the role names.
+    is_admin: bool = False
+
+
+class AuthConfig(BaseModel):
+    """How this deployment expects people to sign in.
+
+    The anon key is public by design — the browser cannot talk to Supabase
+    without it — so serving it here keeps configuration in one place instead of
+    baking it into the frontend build.
+    """
+
+    provider: str
+    supabase_url: str = ""
+    supabase_anon_key: str = ""
+    allow_signup: bool = True
 
 
 class TokenResponse(BaseModel):

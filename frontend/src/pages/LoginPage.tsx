@@ -1,44 +1,78 @@
 import { useState } from 'react'
-import { api, setSession, type AppSettings, type User } from '../api/client'
+import { api, setSession, type AppSettings, type AuthConfig, type User } from '../api/client'
+import { signIn, signUp } from '../lib/auth'
 import './LoginPage.css'
 
 export function LoginPage({
   onSuccess,
   branding,
+  auth,
 }: {
   onSuccess: (user: User) => void
   branding?: AppSettings | null
+  auth?: AuthConfig | null
 }) {
   const platformName = branding?.platform_name || 'Cognitive Logic'
   const tagline = branding?.platform_tagline || 'Business Intelligence'
+  const viaSupabase = auth?.provider === 'supabase'
+  const canSignUp = Boolean(auth?.allow_signup)
+
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [fullName, setFullName] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const signingUp = mode === 'signup' && canSignUp
+
+  function readableError(err: unknown): string {
+    const message = err instanceof Error ? err.message : 'Sign-in failed'
+    if (message.includes('Incorrect') || message.includes('401')) {
+      return 'Incorrect email or password'
+    }
+    if (message.toLowerCase().includes('invalid login credentials')) {
+      return 'Incorrect email or password'
+    }
+    try {
+      const parsed = JSON.parse(message) as { detail?: string }
+      return parsed.detail ?? message
+    } catch {
+      return message
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setBusy(true)
     setError(null)
+    setNotice(null)
     try {
+      if (viaSupabase) {
+        if (signingUp) {
+          const { needsConfirmation } = await signUp(email.trim(), password, fullName.trim())
+          if (needsConfirmation) {
+            setNotice('Account created. Check your email for the confirmation link, then sign in.')
+            setMode('signin')
+            return
+          }
+        } else {
+          await signIn(email.trim(), password)
+        }
+        // The API provisions the local account from the verified token.
+        onSuccess(await api.me())
+        return
+      }
+
       const result = await api.login(email.trim(), password)
       setSession(result.access_token, result.user)
       void remember
       onSuccess(result.user)
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Login failed'
-      if (message.includes('Incorrect') || message.includes('401')) {
-        setError('Incorrect email or password')
-      } else {
-        try {
-          const parsed = JSON.parse(message) as { detail?: string }
-          setError(parsed.detail ?? message)
-        } catch {
-          setError(message)
-        }
-      }
+      setError(readableError(err))
     } finally {
       setBusy(false)
     }
@@ -60,13 +94,34 @@ export function LoginPage({
               <p className="cl-login-brand-title">{platformName}</p>
             </div>
             <div>
-              <p className="cl-login-welcome">Welcome back</p>
-              <p className="cl-login-subtitle">Sign in to continue to {platformName}.</p>
+              <p className="cl-login-welcome">{signingUp ? 'Create your account' : 'Welcome back'}</p>
+              <p className="cl-login-subtitle">
+                {signingUp
+                  ? `Your datasets stay private to your account on ${platformName}.`
+                  : `Sign in to continue to ${platformName}.`}
+              </p>
             </div>
           </div>
 
           <form className="cl-login-form" onSubmit={handleSubmit}>
             {error && <p className="cl-login-error" role="alert">{error}</p>}
+            {notice && <p className="cl-login-notice" role="status">{notice}</p>}
+
+            {signingUp && (
+              <div className="cl-field">
+                <label className="cl-label" htmlFor="cl-name">Full Name</label>
+                <input
+                  id="cl-name"
+                  name="name"
+                  type="text"
+                  autoComplete="name"
+                  placeholder="Ada Lovelace"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  required
+                />
+              </div>
+            )}
 
             <div className="cl-field">
               <label className="cl-label" htmlFor="cl-email">Email Address</label>
@@ -89,7 +144,7 @@ export function LoginPage({
                   id="cl-password"
                   name="password"
                   type={showPassword ? 'text' : 'password'}
-                  autoComplete="current-password"
+                  autoComplete={signingUp ? 'new-password' : 'current-password'}
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -120,14 +175,18 @@ export function LoginPage({
                 <label htmlFor="cl-remember">Remember me</label>
               </div>
               <span className="cl-login-hint">
-                Password resets are handled by your administrator.
+                {viaSupabase
+                  ? 'Password resets are handled by Supabase.'
+                  : 'Password resets are handled by your administrator.'}
               </span>
             </div>
 
             <button type="submit" className="cl-signin-btn" disabled={busy}>
-              {busy ? 'Signing in…' : (
+              {busy ? (
+                signingUp ? 'Creating account…' : 'Signing in…'
+              ) : (
                 <>
-                  Sign In
+                  {signingUp ? 'Create Account' : 'Sign In'}
                   <span className="material-symbols-outlined arrow" aria-hidden="true">arrow_forward</span>
                 </>
               )}
@@ -135,7 +194,24 @@ export function LoginPage({
           </form>
 
           <div className="cl-login-footer">
-            <p>Accounts are provisioned by your administrator.</p>
+            {canSignUp ? (
+              <p>
+                {signingUp ? 'Already have an account?' : "Don't have an account?"}{' '}
+                <button
+                  type="button"
+                  className="cl-login-switch"
+                  onClick={() => {
+                    setMode(signingUp ? 'signin' : 'signup')
+                    setError(null)
+                    setNotice(null)
+                  }}
+                >
+                  {signingUp ? 'Sign in' : 'Create one'}
+                </button>
+              </p>
+            ) : (
+              <p>Accounts are provisioned by your administrator.</p>
+            )}
           </div>
 
         </div>

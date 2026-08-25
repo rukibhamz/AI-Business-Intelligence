@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_admin
 from app.models import User
 from app.schemas import (
     AppSettingsPublic,
@@ -21,6 +21,7 @@ from app.services.app_settings import (
     ensure_providers,
     get_ai_runtime,
     load_app_settings,
+    member_settings_view,
     public_settings_view,
     save_app_settings,
 )
@@ -31,17 +32,21 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 @router.get("", response_model=AppSettingsPublic)
 async def get_settings(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
+    """Branding for everyone; provider configuration for admins only."""
     data = await load_app_settings(db)
-    return public_settings_view(data)
+    view = public_settings_view(data)
+    if not current_user.is_admin:
+        return member_settings_view(view)
+    return view
 
 
 @router.put("", response_model=AppSettingsPublic)
 async def update_settings(
     payload: AppSettingsUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ) -> dict:
     updates = payload.model_dump(exclude_unset=True)
     try:
@@ -55,7 +60,7 @@ async def update_settings(
 async def test_connection(
     payload: ConnectionTestRequest,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ) -> ConnectionTestResponse:
     try:
         return await _run_connection_test(payload, db)
@@ -175,7 +180,7 @@ async def _run_connection_test(
 async def upload_logo(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ) -> dict:
     if not file.filename:
         raise HTTPException(status_code=400, detail="Filename required")
@@ -225,7 +230,7 @@ async def get_logo() -> FileResponse:
 @router.delete("/logo", response_model=AppSettingsPublic)
 async def delete_logo(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ) -> dict:
     dest_dir = branding_upload_dir()
     for old in dest_dir.glob("logo.*"):

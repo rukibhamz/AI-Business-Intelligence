@@ -22,6 +22,7 @@ from app.schemas import (
     ConversationUpdate,
 )
 from app.services.cleanup import prune_dashboard_widgets
+from app.services.ownership import belongs_to, owned_by
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -66,8 +67,13 @@ async def ensure_conversation(
     return conversation
 
 
-async def _load_queries(db: AsyncSession, limit: int = 1000) -> list[QueryModel]:
-    stmt = select(QueryModel).order_by(QueryModel.created_at.desc()).limit(limit)
+async def _load_queries(db: AsyncSession, user: User, limit: int = 1000) -> list[QueryModel]:
+    """This account's questions. A chat thread never spans two people."""
+    stmt = (
+        owned_by(select(QueryModel), QueryModel, user)
+        .order_by(QueryModel.created_at.desc())
+        .limit(limit)
+    )
     return list((await db.execute(stmt)).scalars().all())
 
 
@@ -75,12 +81,16 @@ async def _load_queries(db: AsyncSession, limit: int = 1000) -> list[QueryModel]
 async def list_conversations(
     limit: int = Query(100, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[ConversationSummary]:
-    queries = await _load_queries(db)
+    queries = await _load_queries(db, current_user)
     titles = {
         c.id: c.title
-        for c in (await db.execute(select(Conversation))).scalars().all()
+        for c in (
+            await db.execute(owned_by(select(Conversation), Conversation, current_user))
+        )
+        .scalars()
+        .all()
     }
 
     grouped: dict[str, list[QueryModel]] = {}
@@ -114,9 +124,9 @@ async def list_conversations(
 async def get_conversation(
     conversation_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> ConversationDetail:
-    queries = await _load_queries(db)
+    queries = await _load_queries(db, current_user)
     items = sorted(
         (q for q in queries if conversation_key(q) == conversation_id),
         key=lambda q: q.created_at,
@@ -125,6 +135,8 @@ async def get_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     stored = await db.get(Conversation, conversation_id)
+    if stored is not None and not belongs_to(stored, current_user):
+        stored = None
     return ConversationDetail(
         id=conversation_id,
         title=(stored.title if stored else derive_title(items[0].natural_language)),
@@ -142,7 +154,7 @@ async def rename_conversation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ConversationSummary:
-    queries = await _load_queries(db)
+    queries = await _load_queries(db, current_user)
     items = sorted(
         (q for q in queries if conversation_key(q) == conversation_id),
         key=lambda q: q.created_at,
@@ -151,6 +163,8 @@ async def rename_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     stored = await db.get(Conversation, conversation_id)
+    if stored is not None and not belongs_to(stored, current_user):
+        stored = None
     if not stored:
         # Renaming an older thread materializes its row.
         stored = Conversation(
@@ -179,9 +193,9 @@ async def rename_conversation(
 async def delete_conversation(
     conversation_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> None:
-    queries = await _load_queries(db)
+    queries = await _load_queries(db, current_user)
     items = [q for q in queries if conversation_key(q) == conversation_id]
     if not items:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -191,7 +205,7 @@ async def delete_conversation(
         await db.delete(query)
 
     stored = await db.get(Conversation, conversation_id)
-    if stored:
+    if stored is not None and belongs_to(stored, current_user):
         await db.delete(stored)
 
     await db.commit()

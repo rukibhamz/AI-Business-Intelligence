@@ -27,6 +27,13 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 # missing *tables*, so existing installs need these applied explicitly.
 # Types are given per dialect because MySQL and Postgres disagree.
 _ADDED_COLUMNS: dict[str, dict[str, dict[str, str]]] = {
+    "users": {
+        "supabase_id": {"default": "VARCHAR(64) NULL", "postgresql": "VARCHAR(64)"},
+        "role": {
+            "default": "VARCHAR(20) NOT NULL DEFAULT 'member'",
+            "postgresql": "VARCHAR(20) NOT NULL DEFAULT 'member'",
+        },
+    },
     "queries": {
         "session_id": {"default": "VARCHAR(64) NULL", "postgresql": "VARCHAR(64)"},
         "answer": {"default": "TEXT NULL", "postgresql": "TEXT"},
@@ -37,6 +44,7 @@ _ADDED_COLUMNS: dict[str, dict[str, dict[str, str]]] = {
 
 _ADDED_INDEXES: dict[str, dict[str, str]] = {
     "queries": {"ix_queries_session_id": "session_id"},
+    "users": {"ix_users_supabase_id": "supabase_id"},
 }
 
 

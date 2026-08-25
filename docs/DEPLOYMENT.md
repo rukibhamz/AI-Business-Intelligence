@@ -90,8 +90,9 @@ Three pieces. **Do not put FastAPI on Vercel** — it is for the frontend only.
 1. Create the project, copy the pooled connection string.
 2. Set `DATABASE_URL=postgresql+asyncpg://USER:PASS@HOST:5432/DB`.
    The `+asyncpg` driver is required; `asyncpg` is already in `requirements.txt`.
-3. Tables and the added columns are created on first boot by `init_db()`.
-   No manual migration step.
+3. Tables are created on first boot by `init_db()`, **or** run
+   [`docs/supabase_schema.sql`](supabase_schema.sql) in the Supabase SQL Editor
+   beforehand. No separate Alembic step yet.
 
 ### 3.2 API on Render
 
@@ -109,13 +110,16 @@ Three pieces. **Do not put FastAPI on Vercel** — it is for the frontend only.
 
 ### 3.3 Frontend on Vercel
 
-1. Import the repo, set **Root Directory** to `frontend`.
-2. Set `VITE_API_URL` to the public API base, e.g.
+1. Import the repo, set **Root Directory** to `frontend` (required — otherwise
+   `tsc` is missing because install runs at the monorepo root).
+2. Framework preset: Vite. Install/Build are taken from `frontend/vercel.json`
+   (`npm install` / `npm run build`).
+3. Set `VITE_API_URL` to the public API base, e.g.
    `https://your-api.onrender.com/api`. This is inlined at build time, so
    changing it requires a redeploy.
-3. `vercel.json` rewrites unknown paths to `index.html` so `/dashboard`,
+4. `vercel.json` rewrites unknown paths to `index.html` so `/dashboard`,
    `/findings` etc. deep-link correctly.
-4. Add the resulting origin to the API's `CORS_ORIGINS`, then redeploy the API.
+5. Add the resulting origin to the API's `CORS_ORIGINS`, then redeploy the API.
 
 ---
 

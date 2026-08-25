@@ -30,6 +30,7 @@ from app.services.field_mapping import (
     enrich_config_with_mapping,
     resolve_conflicts,
 )
+from app.services.ownership import fetch_owned, owned_by
 from app.services.profiling import PROFILE_SAMPLE_ROWS, attach_profiles, profile_rows
 from app.services.schema_context import pick_primary_table
 from app.services.schema_registry import (
@@ -196,9 +197,13 @@ async def list_canonical_fields(_: User = Depends(get_current_user)) -> dict[str
 @router.get("", response_model=list[DataSourceResponse])
 async def list_sources(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[DataSourceResponse]:
-    result = await db.execute(select(DataSource).order_by(DataSource.created_at.desc()))
+    result = await db.execute(
+        owned_by(select(DataSource), DataSource, current_user).order_by(
+            DataSource.created_at.desc()
+        )
+    )
     return [_to_response(s) for s in result.scalars().all()]
 
 
@@ -309,7 +314,7 @@ async def create_mysql_source(
 @router.post("/test-mysql")
 async def test_mysql(
     payload: MySQLSourceCreate,
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, str]:
     try:
         await test_mysql_connection(payload.connection_config.model_dump())
@@ -322,11 +327,9 @@ async def test_mysql(
 async def get_source(
     source_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> DataSourceResponse:
-    source = await db.get(DataSource, source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Data source not found")
+    source = await fetch_owned(db, DataSource, source_id, current_user)
     return _to_response(source)
 
 
@@ -335,11 +338,9 @@ async def update_mapping(
     source_id: int,
     payload: FieldMappingUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> DataSourceResponse:
-    source = await db.get(DataSource, source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Data source not found")
+    source = await fetch_owned(db, DataSource, source_id, current_user)
 
     cols = set(
         columns_from_schema(
@@ -367,12 +368,10 @@ async def set_primary_table(
     source_id: int,
     payload: PrimaryTableUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> DataSourceResponse:
     """Choose which table the dashboard and findings analyse."""
-    source = await db.get(DataSource, source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Data source not found")
+    source = await fetch_owned(db, DataSource, source_id, current_user)
 
     schema = parse_schema_json(source.schema_json) or {"tables": []}
     available = [t["name"] for t in schema.get("tables", [])]
@@ -401,12 +400,10 @@ async def set_primary_table(
 async def automap_source(
     source_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> DataSourceResponse:
     """Ask the model to re-map this source's columns from scratch."""
-    source = await db.get(DataSource, source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Data source not found")
+    source = await fetch_owned(db, DataSource, source_id, current_user)
 
     runtime = await get_ai_runtime(db)
     if not runtime["api_key"]:
@@ -445,11 +442,9 @@ async def automap_source(
 async def recompute_source(
     source_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> DataSourceResponse:
-    source = await db.get(DataSource, source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Data source not found")
+    source = await fetch_owned(db, DataSource, source_id, current_user)
     try:
         await _apply_schema_and_mapping(source, reset_mapping=False, db=db)
     except Exception as exc:
@@ -464,11 +459,9 @@ async def update_source(
     source_id: int,
     payload: DataSourceUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> DataSourceResponse:
-    source = await db.get(DataSource, source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Data source not found")
+    source = await fetch_owned(db, DataSource, source_id, current_user)
 
     if payload.name is not None:
         source.name = payload.name
@@ -493,6 +486,9 @@ async def _purge_dependents(db: AsyncSession, source_id: int) -> None:
     ``queries.data_source_id`` is NOT NULL, so the ORM default of nulling the
     foreign key raises an IntegrityError. Delete the dependents explicitly.
     """
+    # No owner filter here on purpose: the source was ownership-checked before
+    # this ran, and every query against it belongs to that same owner. Filtering
+    # again would leave orphans behind and re-raise the IntegrityError.
     result = await db.execute(select(QueryModel).where(QueryModel.data_source_id == source_id))
     queries = list(result.scalars().all())
 
@@ -505,11 +501,9 @@ async def _purge_dependents(db: AsyncSession, source_id: int) -> None:
 async def delete_source(
     source_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> None:
-    source = await db.get(DataSource, source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Data source not found")
+    source = await fetch_owned(db, DataSource, source_id, current_user)
 
     await _purge_dependents(db, source_id)
     await db.delete(source)
@@ -529,11 +523,9 @@ async def preview_source(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    source = await db.get(DataSource, source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Data source not found")
+    source = await fetch_owned(db, DataSource, source_id, current_user)
     try:
         return await preview_source_data(source, table=table, limit=limit, offset=offset)
     except Exception as exc:

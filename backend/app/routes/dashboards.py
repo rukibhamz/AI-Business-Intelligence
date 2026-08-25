@@ -18,6 +18,7 @@ from app.schemas import (
     DashboardWidgetPayload,
 )
 from app.services.chart_recommend import recommend_chart
+from app.services.ownership import fetch_owned, owned_by
 
 router = APIRouter(prefix="/dashboards", tags=["dashboards"])
 
@@ -57,10 +58,10 @@ def _to_response(dash: Dashboard) -> DashboardResponse:
 @router.get("", response_model=list[DashboardResponse])
 async def list_dashboards(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[DashboardResponse]:
     rows = list(
-        (await db.execute(select(Dashboard).order_by(Dashboard.updated_at.desc())))
+        (await db.execute(owned_by(select(Dashboard), Dashboard, current_user).order_by(Dashboard.updated_at.desc())))
         .scalars()
         .all()
     )
@@ -91,7 +92,7 @@ async def ensure_default_dashboard(
 ) -> DashboardResponse:
     """Return the first dashboard, or create 'Main Dashboard'."""
     existing = (
-        await db.execute(select(Dashboard).order_by(Dashboard.created_at.asc()).limit(1))
+        await db.execute(owned_by(select(Dashboard), Dashboard, current_user).order_by(Dashboard.created_at.asc()).limit(1))
     ).scalar_one_or_none()
     if existing:
         return _to_response(existing)
@@ -110,11 +111,9 @@ async def ensure_default_dashboard(
 async def get_dashboard(
     dashboard_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> DashboardResponse:
-    dash = await db.get(Dashboard, dashboard_id)
-    if not dash:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
+    dash = await fetch_owned(db, Dashboard, dashboard_id, current_user)
     return _to_response(dash)
 
 
@@ -123,11 +122,9 @@ async def update_dashboard(
     dashboard_id: int,
     payload: DashboardUpdate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> DashboardResponse:
-    dash = await db.get(Dashboard, dashboard_id)
-    if not dash:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
+    dash = await fetch_owned(db, Dashboard, dashboard_id, current_user)
     if payload.name is not None:
         dash.name = payload.name
     if payload.layout_json is not None:
@@ -141,11 +138,9 @@ async def update_dashboard(
 async def delete_dashboard(
     dashboard_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> None:
-    dash = await db.get(Dashboard, dashboard_id)
-    if not dash:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
+    dash = await fetch_owned(db, Dashboard, dashboard_id, current_user)
     await db.delete(dash)
     await db.commit()
 
@@ -159,11 +154,9 @@ async def add_widget(
     dashboard_id: int,
     payload: DashboardWidgetCreate,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> DashboardResponse:
-    dash = await db.get(Dashboard, dashboard_id)
-    if not dash:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
+    dash = await fetch_owned(db, Dashboard, dashboard_id, current_user)
 
     query = await db.get(QueryModel, payload.query_id)
     if not query or query.status != "completed":
@@ -199,11 +192,9 @@ async def remove_widget(
     dashboard_id: int,
     widget_id: str,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> DashboardResponse:
-    dash = await db.get(Dashboard, dashboard_id)
-    if not dash:
-        raise HTTPException(status_code=404, detail="Dashboard not found")
+    dash = await fetch_owned(db, Dashboard, dashboard_id, current_user)
     layout = _parse_layout(dash.layout_json)
     widgets = [
         w

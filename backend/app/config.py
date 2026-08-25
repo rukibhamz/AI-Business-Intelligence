@@ -29,6 +29,16 @@ class Settings(BaseSettings):
     app_env: str = "development"
     upload_dir: str = "uploads"
 
+    # --- Supabase authentication -------------------------------------------
+    #: Project URL, e.g. https://abcdefgh.supabase.co. Setting this (with a key
+    #: below) switches sign-in from local accounts to Supabase.
+    supabase_url: str = ""
+    #: Publishable anon key. Public by design — the browser needs it to sign in.
+    supabase_anon_key: str = ""
+    #: Legacy shared JWT secret. Only needed for projects still issuing HS256
+    #: tokens; projects on signing keys verify against the JWKS endpoint.
+    supabase_jwt_secret: str = ""
+
     # --- operational limits -------------------------------------------------
     #: Questions per user per minute against the AI query endpoint. Each one can
     #: call a paid provider, so this caps both spend and abuse.
@@ -43,6 +53,19 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def supabase_enabled(self) -> bool:
+        """True when sign-in should go through Supabase rather than local accounts.
+
+        Both values are required: the browser cannot sign in without the anon
+        key, and the API cannot verify what it gets back without the URL.
+        """
+        return bool(self.supabase_url.strip() and self.supabase_anon_key.strip())
+
+    @property
+    def auth_provider(self) -> str:
+        return "supabase" if self.supabase_enabled else "local"
 
     @property
     def is_production(self) -> bool:

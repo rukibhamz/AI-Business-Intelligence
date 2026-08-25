@@ -17,17 +17,23 @@ from app.services.analytics import (
     load_dataset,
     summarize_sources,
 )
+from app.services.ownership import owned_by
 
 router = APIRouter(prefix="/insights", tags=["insights"])
 
 
-async def _list_sources(db: AsyncSession) -> list[DataSource]:
-    result = await db.execute(select(DataSource).order_by(DataSource.created_at.desc()))
+async def _list_sources(db: AsyncSession, user: User) -> list[DataSource]:
+    """Only this account's datasets: findings never span two people's data."""
+    result = await db.execute(
+        owned_by(select(DataSource), DataSource, user).order_by(DataSource.created_at.desc())
+    )
     return list(result.scalars().all())
 
 
-async def _resolve_source(db: AsyncSession, source_id: int | None) -> DataSource | None:
-    sources = await _list_sources(db)
+async def _resolve_source(
+    db: AsyncSession, source_id: int | None, user: User
+) -> DataSource | None:
+    sources = await _list_sources(db, user)
     if not sources:
         return None
     if source_id is not None:
@@ -63,13 +69,13 @@ def _source_meta(source: DataSource, dataset) -> dict:
 async def get_overview(
     source_id: int | None = Query(None),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
-    sources = await _list_sources(db)
+    sources = await _list_sources(db, current_user)
     available = summarize_sources(sources)
     generated_at = datetime.now(UTC).isoformat()
 
-    source = await _resolve_source(db, source_id)
+    source = await _resolve_source(db, source_id, current_user)
     if source is None:
         return {
             "generated_at": generated_at,
@@ -124,14 +130,14 @@ async def get_findings(
     source_id: int | None = Query(None),
     scope: str = Query("all", pattern="^(all|source)$"),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
-    sources = await _list_sources(db)
+    sources = await _list_sources(db, current_user)
     available = summarize_sources(sources)
     generated_at = datetime.now(UTC).isoformat()
 
     if scope == "source" or source_id is not None:
-        source = await _resolve_source(db, source_id)
+        source = await _resolve_source(db, source_id, current_user)
         targets = [source] if source else []
     else:
         analyzable = {s["id"] for s in available if s["analyzable"]}

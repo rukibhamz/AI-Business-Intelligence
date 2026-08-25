@@ -470,3 +470,35 @@ def branding_upload_dir() -> Path:
     path = Path(settings.upload_dir) / "branding"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+#: What a member is allowed to read from settings: the things the app has to
+#: render (name, logo, theme, currency). Provider names, models, endpoints and
+#: key state are configuration, and configuration is the admin's.
+MEMBER_VISIBLE_FIELDS = (
+    "platform_name",
+    "platform_tagline",
+    "logo_url",
+    "color_scheme",
+    "currency",
+)
+
+
+def member_settings_view(view: dict[str, Any]) -> dict[str, Any]:
+    """Strip a settings payload down to what a non-admin needs to render."""
+    redacted: dict[str, Any] = {
+        "llm_provider": "",
+        "openai_model": "",
+        "openai_base_url": "",
+        "api_key_set": False,
+        "api_key_masked": None,
+        "llm_providers": [],
+        "active_provider_id": None,
+        "providers": [],
+        "color_schemes": [],
+        "currencies": [],
+    }
+    for field in MEMBER_VISIBLE_FIELDS:
+        if field in view:
+            redacted[field] = view[field]
+    return redacted

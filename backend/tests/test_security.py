@@ -16,6 +16,22 @@ PUBLIC_BY_DESIGN = {
     ("POST", "/api/auth/login"),
     ("POST", "/api/auth/register"),
     ("GET", "/api/settings/logo"),
+    # The sign-in screen has to know which provider to use before anyone has a
+    # token. It returns the provider name and the Supabase anon key, which is
+    # public by design — never the JWT secret or the service role key.
+    ("GET", "/api/auth/config"),
+}
+
+
+#: Dependencies that establish who is calling. Anything else leaves a route open.
+GUARDS = {"get_current_user", "require_admin"}
+
+#: Configuration a member must never be able to change.
+ADMIN_ONLY = {
+    ("PUT", "/api/settings"),
+    ("POST", "/api/settings/test-connection"),
+    ("POST", "/api/settings/logo"),
+    ("DELETE", "/api/settings/logo"),
 }
 
 
@@ -37,23 +53,38 @@ def _routes():
                 if getattr(dec.func.value, "id", "") != "router":
                     continue
                 sub = dec.args[0].value if dec.args and isinstance(dec.args[0], ast.Constant) else ""
-                guarded = any(
-                    isinstance(d, ast.Call)
+                dependencies = {
+                    getattr(d.args[0], "id", "")
+                    for d in list(node.args.defaults) + list(node.args.kw_defaults)
+                    if isinstance(d, ast.Call)
                     and getattr(d.func, "id", "") == "Depends"
                     and d.args
-                    and getattr(d.args[0], "id", "") == "get_current_user"
-                    for d in list(node.args.defaults) + list(node.args.kw_defaults)
+                }
+                # require_admin depends on get_current_user, so it is a guard too.
+                guarded = bool(dependencies & GUARDS)
+                yield (
+                    dec.func.attr.upper(),
+                    f"/api{prefix}{sub}",
+                    node.name,
+                    guarded,
+                    dependencies,
                 )
-                yield dec.func.attr.upper(), f"/api{prefix}{sub}", node.name, guarded
 
 
 def test_every_route_requires_authentication():
     unprotected = [
         (verb, path, fn)
-        for verb, path, fn, guarded in _routes()
+        for verb, path, fn, guarded, _deps in _routes()
         if not guarded and (verb, path) not in PUBLIC_BY_DESIGN
     ]
     assert unprotected == [], f"Unauthenticated routes: {unprotected}"
+
+
+def test_configuration_endpoints_require_an_admin():
+    """Members share the workspace's AI provider; only an admin may change it."""
+    for verb, path, fn, _guarded, deps in _routes():
+        if (verb, path) in ADMIN_ONLY:
+            assert "require_admin" in deps, f"{verb} {path} ({fn}) is not admin-gated"
 
 
 def test_the_route_table_is_not_empty():

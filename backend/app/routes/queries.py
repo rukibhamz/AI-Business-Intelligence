@@ -41,6 +41,7 @@ from app.services.diagnostics import (
     render_diagnosis,
     render_partial,
 )
+from app.services.ownership import fetch_owned, owned_by
 from app.services.profiling import schema_date_range
 from app.services.rate_limit import RateLimiter
 from app.services.response_planner import (
@@ -119,7 +120,9 @@ def query_to_response(
     )
 
 
-async def _previous_question(db: AsyncSession, session_id: str | None) -> str | None:
+async def _previous_question(
+    db: AsyncSession, session_id: str | None, user: User
+) -> str | None:
     """The last thing asked in this chat.
 
     "What should we do about it?" names no metric. The question before it does,
@@ -129,8 +132,11 @@ async def _previous_question(db: AsyncSession, session_id: str | None) -> str | 
         return None
     previous = (
         await db.execute(
-            select(QueryModel)
-            .where(QueryModel.session_id == session_id)
+            owned_by(
+                select(QueryModel).where(QueryModel.session_id == session_id),
+                QueryModel,
+                user,
+            )
             .order_by(QueryModel.created_at.desc())
             .limit(2)
         )
@@ -197,8 +203,11 @@ async def _finalize(
     if payload.session_id:
         first = (
             await db.execute(
-                select(QueryModel)
-                .where(QueryModel.session_id == payload.session_id)
+                owned_by(
+                    select(QueryModel).where(QueryModel.session_id == payload.session_id),
+                    QueryModel,
+                    current_user,
+                )
                 .order_by(QueryModel.created_at.asc())
                 .limit(1)
             )
@@ -221,9 +230,13 @@ async def list_queries(
     data_source_id: int | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> list[QueryResponse]:
-    stmt = select(QueryModel).order_by(QueryModel.created_at.desc()).limit(limit)
+    stmt = (
+        owned_by(select(QueryModel), QueryModel, current_user)
+        .order_by(QueryModel.created_at.desc())
+        .limit(limit)
+    )
     if data_source_id is not None:
         stmt = stmt.where(QueryModel.data_source_id == data_source_id)
     rows = list((await db.execute(stmt)).scalars().all())
@@ -250,13 +263,18 @@ async def run_query(
     sources: list[DataSource]
 
     if payload.data_source_id is not None:
-        pinned = await db.get(DataSource, payload.data_source_id)
-        if not pinned:
-            raise HTTPException(status_code=404, detail="Data source not found")
+        pinned = await fetch_owned(db, DataSource, payload.data_source_id, current_user)
         sources = [pinned]
     else:
+        # Workspace-wide questions still only reach this account's datasets.
         sources = list(
-            (await db.execute(select(DataSource).order_by(DataSource.id))).scalars().all()
+            (
+                await db.execute(
+                    owned_by(select(DataSource), DataSource, current_user).order_by(DataSource.id)
+                )
+            )
+            .scalars()
+            .all()
         )
 
     intent = classify_intent(payload.natural_language)
@@ -326,7 +344,7 @@ async def run_query(
             analysis = await _analyse(
                 sources,
                 payload.natural_language,
-                previous_question=await _previous_question(db, payload.session_id),
+                previous_question=await _previous_question(db, payload.session_id, current_user),
             )
 
         if analysis is not None and analysis[1] is not None:
@@ -415,7 +433,7 @@ async def run_query(
 
         if pinned is not None:
             source = pinned
-            previous = await _previous_question(db, payload.session_id)
+            previous = await _previous_question(db, payload.session_id, current_user)
             sql, mode = await generate_sql(
                 source,
                 payload.natural_language,
@@ -425,7 +443,7 @@ async def run_query(
                 previous_question=previous,
             )
         else:
-            previous = await _previous_question(db, payload.session_id)
+            previous = await _previous_question(db, payload.session_id, current_user)
             source, sql, mode = await generate_workspace_sql(
                 sources,
                 payload.natural_language,
@@ -525,9 +543,7 @@ async def create_query(
         raise HTTPException(
             status_code=400, detail="data_source_id is required for pending queries"
         )
-    source = await db.get(DataSource, payload.data_source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Data source not found")
+    await fetch_owned(db, DataSource, payload.data_source_id, current_user)
 
     query = QueryModel(
         user_id=current_user.id,
@@ -545,11 +561,9 @@ async def create_query(
 async def export_query_csv(
     query_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> Response:
-    query = await db.get(QueryModel, query_id)
-    if not query:
-        raise HTTPException(status_code=404, detail="Query not found")
+    query = await fetch_owned(db, QueryModel, query_id, current_user)
     if not query.result_json:
         raise HTTPException(status_code=400, detail="Query has no result to export")
 
@@ -574,9 +588,7 @@ async def export_query_csv(
 async def get_query(
     query_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ) -> QueryResponse:
-    query = await db.get(QueryModel, query_id)
-    if not query:
-        raise HTTPException(status_code=404, detail="Query not found")
+    query = await fetch_owned(db, QueryModel, query_id, current_user)
     return query_to_response(query)
