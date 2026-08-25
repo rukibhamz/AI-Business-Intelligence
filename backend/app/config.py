@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import secrets
+from typing import Any
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Values shipped for local convenience that must never reach a live deployment.
@@ -11,6 +13,20 @@ INSECURE_ADMIN_PASSWORD = "admin123"
 
 class ConfigurationError(RuntimeError):
     """Raised when production settings are unsafe. Startup aborts."""
+
+
+def normalize_database_url(url: str) -> str:
+    """Supabase/Neon copy URIs as postgresql:// — this app needs an async driver."""
+    value = (url or "").strip()
+    if value.startswith("postgres://"):
+        value = "postgresql://" + value[len("postgres://") :]
+    if value.startswith("postgresql://"):
+        value = "postgresql+asyncpg://" + value[len("postgresql://") :]
+    elif value.startswith("postgresql+psycopg2://"):
+        value = "postgresql+asyncpg://" + value[len("postgresql+psycopg2://") :]
+    elif value.startswith("postgresql+psycopg://"):
+        value = "postgresql+asyncpg://" + value[len("postgresql+psycopg://") :]
+    return value
 
 
 class Settings(BaseSettings):
@@ -49,6 +65,13 @@ class Settings(BaseSettings):
     sql_echo: bool = False
     #: Serve /docs and /redoc. Off in production by default.
     expose_api_docs: bool = True
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def _async_postgres_url(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            return normalize_database_url(value)
+        return value
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -88,11 +88,17 @@ Three pieces. **Do not put FastAPI on Vercel** — it is for the frontend only.
 ### 3.1 Database
 
 1. Create the project, copy the pooled connection string.
-2. Set `DATABASE_URL=postgresql+asyncpg://USER:PASS@HOST:5432/DB`.
-   The `+asyncpg` driver is required; `asyncpg` is already in `requirements.txt`.
+2. Set `DATABASE_URL` to the Supabase/Neon URI. You can paste the default
+   `postgresql://…` string — the app rewrites it to `postgresql+asyncpg://`.
+   Prefer the **pooled** connection (port 6543) on free tiers.
 3. Tables are created on first boot by `init_db()`, **or** run
    [`docs/supabase_schema.sql`](supabase_schema.sql) in the Supabase SQL Editor
    beforehand. No separate Alembic step yet.
+
+If you deploy as a **native Python** service (not Docker), set the environment
+to **Python 3.12** (`backend/runtime.txt`). Python 3.14 often cannot install
+`asyncpg`, which shows up as `No module named 'psycopg2'` or a failed wheel build.
+Prefer the Docker blueprint in `render.yaml`.
 
 ### 3.2 API on Render
 

@@ -12,9 +12,9 @@ httpx==0.28.1
 # Database drivers — install the one matching DATABASE_URL.
 # MySQL (local XAMPP default):
 aiomysql==0.2.0
-# PostgreSQL (Supabase / Neon / RDS). Optional for local MySQL.
-# Skipped on 3.14+ until wheels catch up (compiling from source fails on Windows).
-asyncpg==0.30.0; python_version < "3.14"
+# PostgreSQL (Supabase / Neon / RDS) — required on Render.
+# Prefer Python 3.12 (Docker / runtime.txt). 3.14 may lack wheels on some hosts.
+asyncpg==0.30.0
 
 # Data connectors (CSV uses the stdlib; Excel needs openpyxl)
 openpyxl==3.1.5

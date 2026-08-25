@@ -1,6 +1,11 @@
 """Production must refuse to start with the shipped development defaults."""
 
-from app.config import INSECURE_ADMIN_PASSWORD, INSECURE_SECRET_KEY, Settings
+from app.config import (
+    INSECURE_ADMIN_PASSWORD,
+    INSECURE_SECRET_KEY,
+    Settings,
+    normalize_database_url,
+)
 
 STRONG_SECRET = "x" * 48
 STRONG_ADMIN = "a-strong-admin-password"
@@ -16,6 +21,19 @@ def prod(**overrides) -> Settings:
     }
     base.update(overrides)
     return Settings(**base)
+
+
+def test_supabase_uri_is_rewritten_to_asyncpg():
+    assert normalize_database_url(
+        "postgresql://user:pass@db.example.com:5432/postgres"
+    ).startswith("postgresql+asyncpg://")
+    assert normalize_database_url(
+        "postgres://user:pass@db.example.com:5432/postgres"
+    ).startswith("postgresql+asyncpg://")
+    settings = Settings(
+        database_url="postgresql://user:pass@db.example.com:5432/postgres"
+    )
+    assert "+asyncpg" in settings.database_url
 
 
 def test_development_defaults_are_allowed_locally():
