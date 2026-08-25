@@ -190,7 +190,10 @@ export function AppShell({
 
       <nav className="shell-nav-scroll" aria-label="Main navigation">
         {NAV_GROUPS.map((group) => {
-          const items = NAV_ITEMS.filter((item) => item.group === group)
+          // Settings is the one thing an admin has that a member does not.
+          const items = NAV_ITEMS.filter(
+            (item) => item.group === group && (item.id !== 'settings' || user.is_admin),
+          )
           if (items.length === 0) return null
           return (
             <div key={group} className="shell-nav-section">

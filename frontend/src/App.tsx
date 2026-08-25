@@ -3,8 +3,8 @@ import {
   api,
   clearSession,
   getStoredUser,
-  getToken,
   type AppSettings,
+  type AuthConfig,
   type DataSource,
   type Finding,
   type HealthResponse,
@@ -22,13 +22,15 @@ import { DataSourcesPage } from './pages/DataSourcesPage'
 import { FindingsPage } from './pages/FindingsPage'
 import { HistoryPage } from './pages/HistoryPage'
 import { LoginPage } from './pages/LoginPage'
+import { currentToken, loadAuthConfig, onAuthChange, signOut, supabase } from './lib/auth'
 import { OverviewPage } from './pages/OverviewPage'
 import { SettingsPage } from './pages/SettingsPage'
 import './App.css'
 
 function App() {
   const [user, setUser] = useState<User | null>(getStoredUser())
-  const [authChecking, setAuthChecking] = useState(!!getToken())
+  const [authChecking, setAuthChecking] = useState(true)
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null)
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [sources, setSources] = useState<DataSource[]>([])
   const [queries, setQueries] = useState<QueryRecord[]>([])
@@ -52,21 +54,59 @@ function App() {
   /** Conversation addressed by the URL, e.g. /ask?c=s_abc123 */
   const conversationId = new URLSearchParams(location.search).get('c')
 
+  /**
+   * Restore whatever session exists.
+   *
+   * Which provider is in charge is the API's decision, so that comes first;
+   * then Supabase is given the chance to rehydrate its own session from
+   * storage before we ask who the caller is.
+   */
   useEffect(() => {
-    const token = getToken()
-    if (!token) {
-      setAuthChecking(false)
-      return
+    let cancelled = false
+
+    async function restore() {
+      try {
+        const config = await loadAuthConfig(api.authConfig)
+        if (cancelled) return
+        setAuthConfig(config)
+        if (config.provider === 'supabase') supabase()
+      } catch {
+        // The API is unreachable; the login screen will say so on submit.
+      }
+
+      const token = await currentToken()
+      if (!token) {
+        if (!cancelled) setAuthChecking(false)
+        return
+      }
+      try {
+        const me = await api.me()
+        if (!cancelled) setUser(me)
+      } catch {
+        if (!cancelled) {
+          clearSession()
+          setUser(null)
+        }
+      } finally {
+        if (!cancelled) setAuthChecking(false)
+      }
     }
-    api
-      .me()
-      .then(setUser)
-      .catch(() => {
+
+    void restore()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // A session ending in another tab should end here too.
+  useEffect(() => {
+    return onAuthChange((signedIn) => {
+      if (!signedIn) {
         clearSession()
         setUser(null)
-      })
-      .finally(() => setAuthChecking(false))
-  }, [])
+      }
+    })
+  }, [authConfig])
 
   const load = useCallback(async () => {
     setError(null)
@@ -140,7 +180,7 @@ function App() {
   const refreshAll = useCallback(() => setRefreshToken((n) => n + 1), [])
 
   function handleLogout() {
-    clearSession()
+    void signOut()
     setUser(null)
     setSources([])
     setQueries([])
@@ -173,6 +213,7 @@ function App() {
     return (
       <LoginPage
         branding={branding}
+        auth={authConfig}
         onSuccess={(loggedIn) => {
           setUser(loggedIn)
           // Sign-in always lands on a fresh analysis, whatever URL was open.
@@ -261,15 +302,32 @@ function App() {
           />
         )}
 
-        {view === 'settings' && (
-          <SettingsPage
-            onSaved={(saved) => {
-              setBranding(saved)
-              setCurrency(saved.currency)
-              refreshAll()
-            }}
-          />
-        )}
+        {view === 'settings' &&
+          (user.is_admin ? (
+            <SettingsPage
+              onSaved={(saved) => {
+                setBranding(saved)
+                setCurrency(saved.currency)
+                refreshAll()
+              }}
+            />
+          ) : (
+            // Hiding the nav item is not a gate — the URL is still typeable.
+            // The API refuses the writes; this explains why rather than
+            // rendering a settings page that cannot save.
+            <div className="cl-restricted" role="status">
+              <span className="material-symbols-outlined" aria-hidden="true">
+                lock
+              </span>
+              <div>
+                <h2>Settings are managed by an administrator</h2>
+                <p>
+                  Your datasets, questions and dashboards are yours alone. The AI provider and
+                  branding are configured once for the whole workspace.
+                </p>
+              </div>
+            </div>
+          ))}
       </AppShell>
 
       {paletteOpen && (

@@ -156,6 +156,27 @@ AI-Business-Intelligence/
       them, not just the first
 - [x] **Averages share an axis with what they average** — avg stock and lowest
       stock are both stock; only percentages and 1-5 ratings get their own scale
+- [x] **Supabase authentication** (`services/supabase_auth.py`) — sign-in moves to
+      Supabase as soon as `SUPABASE_URL` and `SUPABASE_ANON_KEY` are set, and
+      stays local until then, so nothing breaks before the project exists. The
+      API verifies the access token itself (HS256 shared secret, or the
+      project's JWKS for signing keys), then provisions a local account from
+      the verified claims. Local password endpoints close while Supabase is in
+      charge — a second front door with different rules is not a fallback
+- [x] **Roles** — `users.role` is "admin" or "member". The first account to sign
+      in becomes admin, as does `ADMIN_EMAIL`. Admin unlocks Settings and
+      nothing else: it is not a key to other people's data
+- [x] **Per-account isolation** (`services/ownership.py`) — a dataset belongs to
+      whoever uploaded it. Sources, questions, chats, dashboards, findings and
+      the overview are all scoped to the caller; another account's row reports
+      404, not 403, because "exists but is not yours" is itself information.
+      Covered by HTTP-level tests in `tests/test_isolation.py`
+- [x] **Settings gated** — writes require an admin, and a member's `GET
+      /api/settings` carries branding only: no provider, model, endpoint or key
+      state. The UI hides the nav item and refuses the view if the URL is typed
+- [x] **`python -m app.scripts.reset_workspace --yes`** — clears datasets,
+      questions, chats and dashboards left over from local accounts. A script,
+      never a startup step: a live database should not be wiped by a restart
 - [x] **Chart-type fix:** a date axis is never a pie chart
 - [x] **Heuristic planner learned GROUP BY** — "revenue by region" now aggregates
       by region instead of dumping rows sorted by revenue; "over time" groups by
