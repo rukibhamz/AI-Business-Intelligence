@@ -87,10 +87,22 @@ Three pieces. **Do not put FastAPI on Vercel** — it is for the frontend only.
 
 ### 3.1 Database
 
-1. Create the project, copy the pooled connection string.
-2. Set `DATABASE_URL` to the Supabase/Neon URI. You can paste the default
-   `postgresql://…` string — the app rewrites it to `postgresql+asyncpg://`.
-   Prefer the **pooled** connection (port 6543) on free tiers.
+1. Create the project in Supabase.
+2. Set `DATABASE_URL` from **Connect → Connection string → Session pooler**
+   (host like `aws-0-<region>.pooler.supabase.com`, port **5432**, user
+   `postgres.<project-ref>`). The app rewrites `postgresql://` to
+   `postgresql+asyncpg://` automatically.
+
+   **Do not use the Direct connection** (`db.<ref>.supabase.co`). That host is
+   IPv6-only; Render’s free tier is IPv4-only and fails with
+   `OSError: [Errno 101] Network is unreachable`.
+
+   Example shape (password URL-encoded if it has special characters):
+
+   ```text
+   postgresql://postgres.YOUR_REF:YOUR_PASSWORD@aws-0-eu-west-2.pooler.supabase.com:5432/postgres
+   ```
+
 3. Tables are created on first boot by `init_db()`, **or** run
    [`docs/supabase_schema.sql`](supabase_schema.sql) in the Supabase SQL Editor
    beforehand. No separate Alembic step yet.

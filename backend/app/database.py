@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -6,10 +7,30 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
 
+
+def _async_engine_url(url: str) -> str:
+    """Ensure Supabase URLs request TLS (required by the pooler)."""
+    if "supabase.com" not in url and "supabase.co" not in url:
+        return url
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if "ssl" not in query and "sslmode" not in query:
+        query["ssl"] = ["require"]
+    return urlunparse(parsed._replace(query=urlencode(query, doseq=True)))
+
+
+def _connect_args(url: str) -> dict:
+    """Transaction-mode poolers (port 6543) break asyncpg's prepared statements."""
+    if ":6543" in url:
+        return {"statement_cache_size": 0}
+    return {}
+
+
 engine = create_async_engine(
-    settings.database_url,
+    _async_engine_url(settings.database_url),
     echo=settings.sql_echo,
     pool_pre_ping=True,
+    connect_args=_connect_args(settings.database_url),
 )
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
