@@ -3,6 +3,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
   Line,
   LineChart,
   Pie,
@@ -115,6 +116,13 @@ export function ResultChart({ result, chart, chartType, height = 220 }: Props) {
               tickLine={false}
               axisLine={false} />
             <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'var(--cl-accent-quiet)' }} />
+            {valueKeys.length > 1 && (
+              <Legend
+                iconType="circle"
+                iconSize={8}
+                wrapperStyle={{ fontSize: 12, fontFamily: 'var(--cl-font-body)', paddingTop: 4 }}
+              />
+            )}
             {valueKeys.map((key, i) => (
               <Line
                 key={key}
@@ -143,6 +151,13 @@ export function ResultChart({ result, chart, chartType, height = 220 }: Props) {
               tickLine={false}
               axisLine={false} />
           <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'var(--cl-accent-quiet)' }} />
+          {valueKeys.length > 1 && (
+            <Legend
+              iconType="circle"
+              iconSize={8}
+              wrapperStyle={{ fontSize: 12, fontFamily: 'var(--cl-font-body)', paddingTop: 4 }}
+            />
+          )}
           {valueKeys.map((key, i) => (
             <Bar key={key} dataKey={key} fill={COLORS[i % COLORS.length]} radius={[2, 2, 0, 0]} />
           ))}

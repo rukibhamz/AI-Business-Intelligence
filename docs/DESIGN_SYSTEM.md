@@ -107,14 +107,16 @@ in `backend/app/services/response_planner.py` and returns it as
 |--------|------|-----------|
 | `metric` | one row, one number ("how many…", "total…") | large figure + one sentence |
 | `chart` | a comparison or a series the data supports | chart card, rows collapsed |
-| `narrative` | "why", "explain", "summarise", "how did…" | prose, plus a supporting chart only for a real series |
-| `table` | "list", "show rows", wide results, one record, no numeric column | the grid |
+| `narrative` | "why", "explain", "summarise", default for management | prose; optional supporting chart |
+| `table` | "list", "show rows", wide/long results | the grid |
+| `meta` | identity / how the product works | prose only — no SQL or rows |
 | `empty` | query returned no rows | a sentence saying so |
 
-**Chart type** comes from `chart_recommend.py`, in this order: a date axis is a
-line (never a pie — slices of a whole make no sense across periods); several
-measures compare as bars; a handful of categories is a pie; everything else is
-a bar.
+**Chart type** comes from `chart_recommend.py`, in this order: a pure time
+series ("over time", "trend") is a line; month-on-month / per-product /
+compare asks stay as bars even on a date axis; several measures compare as
+bars; a handful of categories is a pie; an explicit "bar/line/pie chart"
+request wins when the shape can still be drawn. Everything else is a bar.
 
 **Field mapping:** columns are mapped to canonical business fields by the AI
 provider (`services/ai_mapping.py`) using profiles and real values, falling back

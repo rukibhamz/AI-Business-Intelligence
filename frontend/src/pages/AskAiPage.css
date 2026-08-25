@@ -570,42 +570,88 @@
   overflow-wrap: anywhere;
 }
 
-/* -------------------------------------------------------- actions ----- */
-.ask-actions {
+/* -------------------------------------------------------- tools ----- */
+.ask-msg-tools {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  gap: 2px;
+  margin-top: 2px;
 }
 
-.ask-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
-  border: 1px solid var(--cl-border);
-  border-radius: var(--cl-radius-full);
-  background: var(--cl-surface-container-lowest);
-  color: var(--cl-on-surface-variant);
-  font-family: var(--cl-font-body);
-  font-size: 12px;
-  font-weight: 600;
+.ask-tool-icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--cl-radius);
+  background: transparent;
+  color: var(--cl-on-surface-muted);
   cursor: pointer;
   transition: background var(--cl-duration-fast) var(--cl-ease),
     color var(--cl-duration-fast) var(--cl-ease);
 }
 
-.ask-action:hover:not(:disabled) {
+.ask-tool-icon:hover,
+.ask-tool-menu.is-open > .ask-tool-icon {
   background: var(--cl-surface-container-low);
   color: var(--cl-on-surface);
 }
 
-.ask-action:disabled {
+.ask-tool-icon .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.ask-tool-menu {
+  position: relative;
+}
+
+.ask-tool-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  min-width: 11.5rem;
+  padding: 4px;
+  border: 1px solid var(--cl-border);
+  border-radius: var(--cl-radius-md);
+  background: var(--cl-surface-container-lowest);
+  box-shadow: var(--cl-shadow-level-2);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ask-tool-dropdown button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--cl-radius-sm);
+  background: transparent;
+  color: var(--cl-on-surface);
+  font-family: var(--cl-font-body);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ask-tool-dropdown button:hover:not(:disabled) {
+  background: var(--cl-surface-container-low);
+}
+
+.ask-tool-dropdown button:disabled {
   opacity: 0.55;
   cursor: default;
 }
 
-.ask-action .material-symbols-outlined {
-  font-size: 15px;
+.ask-tool-dropdown .material-symbols-outlined {
+  font-size: 16px;
+  color: var(--cl-on-surface-muted);
 }
 
 /* ======================================================= composer ====== */

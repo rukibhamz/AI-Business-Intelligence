@@ -164,6 +164,9 @@ function measureFormatter(measure: string) {
  * A "why" answer earns a follow-up. Offering it is how someone discovers they
  * can ask for the remedy as well as the cause.
  */
+/** How close to the bottom still counts as "reading the newest message". */
+const STICK_THRESHOLD_PX = 80
+
 const FOLLOW_UPS = ['What should we do about it?', 'How do we prevent this happening again?']
 
 function uid() {
@@ -230,9 +233,13 @@ export function AskAiPage({
   const [copiedId, setCopiedId] = useState<string | null>(null)
   /** Answers that lead with prose or a chart keep their rows collapsed. */
   const [tableOpen, setTableOpen] = useState<Set<string>>(() => new Set())
+  /** Quiet overflow menu id for export / SQL / pin. */
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null)
 
   const threadRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  /** False once the reader scrolls up, so the thread stops chasing the bottom. */
+  const stickToBottom = useRef(true)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -241,6 +248,17 @@ export function AskAiPage({
   const thinkingLabel = useThinkingLabel(busy)
   const assistantName = branding?.platform_name || 'Cognitive Logic'
   const isEmpty = messages.length === 0 && !busy && !restoring
+
+  useEffect(() => {
+    if (!menuOpenId) return
+    const onPointer = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null
+      if (target?.closest('.ask-tool-menu')) return
+      setMenuOpenId(null)
+    }
+    document.addEventListener('mousedown', onPointer)
+    return () => document.removeEventListener('mousedown', onPointer)
+  }, [menuOpenId])
 
   // The chat being viewed: an explicit conversation from the URL, or the one
   // this browser session started.
@@ -275,8 +293,47 @@ export function AskAiPage({
   useEffect(() => {
     const el = threadRef.current
     if (!el) return
+    stickToBottom.current = true
     el.scrollTo({ top: el.scrollHeight, behavior: messages.length > 1 ? 'smooth' : 'auto' })
   }, [messages, busy])
+
+  /**
+   * Hold the thread at the newest message while it keeps growing.
+   *
+   * An answer arrives before its chart and table have laid out, so scrolling
+   * once on arrival leaves the reader stranded halfway up the reply. This
+   * re-pins on every size change — until the reader scrolls up, which hands
+   * control back to them until they return to the bottom.
+   */
+  useEffect(() => {
+    const el = threadRef.current
+    if (!el) return
+
+    const distanceFromBottom = () => el.scrollHeight - el.scrollTop - el.clientHeight
+    const onScroll = () => {
+      stickToBottom.current = distanceFromBottom() <= STICK_THRESHOLD_PX
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+
+    const observer = new ResizeObserver(() => {
+      if (stickToBottom.current) el.scrollTop = el.scrollHeight
+    })
+    observer.observe(el)
+    for (const child of Array.from(el.children)) observer.observe(child)
+
+    // The list is replaced when a conversation loads, so watch for new children.
+    const mutations = new MutationObserver(() => {
+      for (const child of Array.from(el.children)) observer.observe(child)
+      if (stickToBottom.current) el.scrollTop = el.scrollHeight
+    })
+    mutations.observe(el, { childList: true, subtree: true })
+
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      observer.disconnect()
+      mutations.disconnect()
+    }
+  }, [])
 
   useEffect(() => {
     return () => abortRef.current?.abort()
@@ -418,10 +475,11 @@ export function AskAiPage({
   }
 
   async function copyAnswer(msg: AssistantMessage) {
-    const parts = [msg.question, msg.text, msg.query?.generated_sql ?? '']
+    const parts = [msg.text]
     try {
       await navigator.clipboard.writeText(parts.filter(Boolean).join('\n\n'))
       setCopiedId(msg.id)
+      setMenuOpenId(null)
       window.setTimeout(() => setCopiedId(null), 1600)
     } catch {
       /* clipboard blocked */
@@ -530,6 +588,10 @@ export function AskAiPage({
     const format: ResponseFormat = msg.query?.response_format ?? (rows.length ? 'table' : 'empty')
     const chart = msg.query?.chart
     const showChart = Boolean(result && chart && chart.type !== 'table')
+    const isMeta = format === 'meta'
+    const isDataAnswer = Boolean(
+      completed && !isMeta && (rows.length > 0 || msg.query?.generated_sql),
+    )
 
     // A "why" answer ships with the evidence behind it and, when the question
     // asked for them, the actions it supports.
@@ -548,10 +610,11 @@ export function AskAiPage({
       return { label: numericCol.replace(/_/g, ' '), value: raw.toLocaleString() }
     })()
 
-    // Only a table answer leads with the grid. A number, a chart, or prose is
-    // the answer; the rows behind it stay one click away.
-    const tableLeads = format === 'table' || (format === 'metric' && !metricValue)
-    const showTable = rows.length > 0 && (tableLeads || tableOpen.has(msg.id))
+    // Only an explicit table answer leads with the grid. Metric / chart /
+    // narrative answers stay prose-first; rows are optional under ⋯.
+    const tableLeads = format === 'table'
+    const showTable = !isMeta && rows.length > 0 && (tableLeads || tableOpen.has(msg.id))
+    const menuOpen = menuOpenId === msg.id
 
     return (
       <div key={msg.id} className="ask-msg ask-msg--ai">
@@ -563,15 +626,15 @@ export function AskAiPage({
           <div className="ask-msg-head">
             <span className="ask-msg-author">{assistantName}</span>
             <span className="ask-msg-time">{timeLabel(msg.at)}</span>
-            {completed && (
+            {completed && isDataAnswer && (
               <span className="ask-badge is-ok">
                 <span className="material-symbols-outlined" aria-hidden="true">
                   check_circle
                 </span>
-                Ran on your data
+                Grounded in your data
               </span>
             )}
-            {sourceName && <span className="ask-msg-source">{sourceName}</span>}
+            {sourceName && isDataAnswer && <span className="ask-msg-source">{sourceName}</span>}
           </div>
 
           <p className="ask-answer">{msg.text}</p>
@@ -706,67 +769,106 @@ export function AskAiPage({
           )}
 
           {(msg.query || msg.error) && (
-            <div className="ask-actions">
-              {!tableLeads && rows.length > 0 && (
-                <button
-                  type="button"
-                  className="ask-action"
-                  onClick={() =>
-                    setTableOpen((prev) => {
-                      const next = new Set(prev)
-                      if (next.has(msg.id)) next.delete(msg.id)
-                      else next.add(msg.id)
-                      return next
-                    })
-                  }
-                >
-                  <span className="material-symbols-outlined" aria-hidden="true">
-                    table_rows
-                  </span>
-                  {tableOpen.has(msg.id)
-                    ? 'Hide rows'
-                    : `Show ${rows.length} row${rows.length === 1 ? '' : 's'}`}
-                </button>
-              )}
-              {msg.query?.generated_sql && (
-                <button type="button" className="ask-action" onClick={() => toggleSql(msg.id)}>
-                  <span className="material-symbols-outlined" aria-hidden="true">
-                    code
-                  </span>
-                  {msg.sqlOpen ? 'Hide SQL' : 'View SQL'}
-                </button>
-              )}
-              {completed && (
-                <>
-                  <button
-                    type="button"
-                    className="ask-action"
-                    onClick={() => void api.downloadQueryCsv(msg.query!.id)}
-                  >
-                    <span className="material-symbols-outlined" aria-hidden="true">
-                      download
-                    </span>
-                    CSV
-                  </button>
-                  <button
-                    type="button"
-                    className="ask-action"
-                    disabled={msg.pinned}
-                    onClick={() => void pinQuery(msg.id, msg.query!)}
-                  >
-                    <span className="material-symbols-outlined" aria-hidden="true">
-                      push_pin
-                    </span>
-                    {msg.pinned ? 'Pinned' : 'Pin to dashboard'}
-                  </button>
-                </>
-              )}
-              <button type="button" className="ask-action" onClick={() => void copyAnswer(msg)}>
+            <div className="ask-msg-tools">
+              <button
+                type="button"
+                className="ask-tool-icon"
+                onClick={() => void copyAnswer(msg)}
+                title={copiedId === msg.id ? 'Copied' : 'Copy answer'}
+                aria-label={copiedId === msg.id ? 'Copied' : 'Copy answer'}
+              >
                 <span className="material-symbols-outlined" aria-hidden="true">
                   {copiedId === msg.id ? 'check' : 'content_copy'}
                 </span>
-                {copiedId === msg.id ? 'Copied' : 'Copy'}
               </button>
+
+              {isDataAnswer && (
+                <div className={`ask-tool-menu${menuOpen ? ' is-open' : ''}`}>
+                  <button
+                    type="button"
+                    className="ask-tool-icon"
+                    aria-expanded={menuOpen}
+                    aria-haspopup="menu"
+                    title="More actions"
+                    aria-label="More actions"
+                    onClick={() => setMenuOpenId(menuOpen ? null : msg.id)}
+                  >
+                    <span className="material-symbols-outlined" aria-hidden="true">
+                      more_horiz
+                    </span>
+                  </button>
+                  {menuOpen && (
+                    <div className="ask-tool-dropdown" role="menu">
+                      {!tableLeads && rows.length > 0 && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            setTableOpen((prev) => {
+                              const next = new Set(prev)
+                              if (next.has(msg.id)) next.delete(msg.id)
+                              else next.add(msg.id)
+                              return next
+                            })
+                            setMenuOpenId(null)
+                          }}
+                        >
+                          <span className="material-symbols-outlined" aria-hidden="true">
+                            table_rows
+                          </span>
+                          {tableOpen.has(msg.id) ? 'Hide underlying rows' : 'Show underlying rows'}
+                        </button>
+                      )}
+                      {msg.query?.generated_sql && (
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            toggleSql(msg.id)
+                            setMenuOpenId(null)
+                          }}
+                        >
+                          <span className="material-symbols-outlined" aria-hidden="true">
+                            code
+                          </span>
+                          {msg.sqlOpen ? 'Hide SQL' : 'View SQL'}
+                        </button>
+                      )}
+                      {completed && (
+                        <>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onClick={() => {
+                              void api.downloadQueryCsv(msg.query!.id)
+                              setMenuOpenId(null)
+                            }}
+                          >
+                            <span className="material-symbols-outlined" aria-hidden="true">
+                              download
+                            </span>
+                            Export CSV
+                          </button>
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={msg.pinned}
+                            onClick={() => {
+                              void pinQuery(msg.id, msg.query!)
+                              setMenuOpenId(null)
+                            }}
+                          >
+                            <span className="material-symbols-outlined" aria-hidden="true">
+                              push_pin
+                            </span>
+                            {msg.pinned ? 'Pinned to dashboard' : 'Pin to dashboard'}
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -824,7 +926,7 @@ export function AskAiPage({
               {hasSources
                 ? `Ask in plain English. ${assistantName} writes the SQL, runs it across your ${
                     sources.length
-                  } connected dataset${sources.length === 1 ? '' : 's'}, and shows you the rows.`
+                  } connected dataset${sources.length === 1 ? '' : 's'}, and answers in plain language.`
                 : 'Upload a CSV or connect a database under Data Sources, then come back and ask a question.'}
             </p>
 

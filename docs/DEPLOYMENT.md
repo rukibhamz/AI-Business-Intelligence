@@ -28,6 +28,29 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 Start from [`.env.production.example`](../.env.production.example).
 
+### Secrets checklist before every `git push`
+
+| Keep out of git | Why |
+|-----------------|-----|
+| `.env`, `.env.docker`, `.env.production` | Live `SECRET_KEY`, DB passwords, AI keys |
+| `uploads/` / `backend/uploads/` | Customer CSVs and Excel files |
+| Provider keys pasted into Settings | Stored in the app DB, not in the repo — still rotate if a laptop is shared |
+| `*.pem`, `credentials.json`, service-account JSON | Cloud/TLS credentials |
+
+Safe to commit: `.env.example`, `.env.production.example` (placeholders only), and
+`render.yaml` where secrets use `sync: false` / `generateValue`.
+
+Quick local check:
+
+```bash
+git status
+git check-ignore -v .env backend/uploads
+# Should show ignored. Never force-add (-f) those paths.
+```
+
+If a real key was ever committed, rotate it at the provider and rewrite history
+(or treat the key as burned) — removing it from a later commit is not enough.
+
 ---
 
 ## 2. Verify locally before shipping

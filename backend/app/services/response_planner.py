@@ -14,9 +14,11 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from app.services.chart_recommend import recommend_chart
+from app.services.chart_recommend import is_ratio_column, recommend_chart
 
-ResponseFormat = Literal["metric", "narrative", "chart", "table", "empty", "diagnostic"]
+ResponseFormat = Literal[
+    "metric", "narrative", "chart", "table", "empty", "diagnostic", "meta"
+]
 
 # --- question intent cues ---------------------------------------------------
 
@@ -163,21 +165,28 @@ def plan_response(
 
     numeric = _numeric_columns(columns, rows)
     categorical = [c for c in columns if c not in numeric]
-    chart = recommend_chart(columns, rows)
+    chart = recommend_chart(columns, rows, question=question)
     chartable = chart["type"] != "table" and bool(chart.get("value_keys"))
 
     wants_chart = _matches(question, _CHART_WORDS)
     wants_table = _matches(question, _TABLE_WORDS)
     wants_narrative = _matches(question, _NARRATIVE_WORDS)
     wants_metric = _matches(question, _METRIC_WORDS)
+    # "as a bar chart" is presentation, not a request for prose about charts.
+    presentation_only = bool(
+        re.search(
+            r"(?i)\b(?:as|in|like)\s+(?:a\s+)?(?:bar|line|pie)\s*charts?\b|"
+            r"\b(?:bar|line|pie)\s*charts?\b",
+            question,
+        )
+    )
+    if presentation_only:
+        wants_narrative = False
+        wants_chart = True
 
     # A single number is an answer, not a chart.
     if len(rows) == 1 and len(numeric) == 1 and len(columns) <= 2:
         return {"format": "metric", "chart": None, "reason": "single_value"}
-
-    # One record with many fields reads as a table, never as a chart.
-    if len(rows) == 1:
-        return {"format": "table", "chart": None, "reason": "single_row"}
 
     # Explicit asks win, as long as the data can support them.
     if wants_chart and chartable:
@@ -189,22 +198,35 @@ def plan_response(
         support = chart if (chartable and len(rows) >= 3) else None
         return {"format": "narrative", "chart": support, "reason": "asked_for_explanation"}
 
-    # No numeric column means there is nothing to plot.
+    # One record: management gets a sentence, not a one-row grid — unless they
+    # asked for the raw table.
+    if len(rows) == 1:
+        return {"format": "narrative", "chart": None, "reason": "single_row_prose"}
+
+    if wants_metric and len(rows) <= 2 and numeric:
+        return {"format": "metric", "chart": None, "reason": "aggregate_question"}
+
+    # No numeric column — prose for a short list; a grid only when it is long
+    # or they asked for one.
     if not numeric:
-        return {"format": "table", "chart": None, "reason": "no_numeric_columns"}
+        if len(rows) > 15:
+            return {"format": "table", "chart": None, "reason": "long_text_result"}
+        return {"format": "narrative", "chart": None, "reason": "text_result"}
 
     # Wide result sets are easier to read as a table.
     if len(columns) > 6 and not wants_chart:
         return {"format": "table", "chart": None, "reason": "wide_result"}
 
-    if wants_metric and len(rows) <= 2 and numeric:
-        return {"format": "metric", "chart": None, "reason": "aggregate_question"}
-
     # A clean category/measure or time/measure shape is what charts are for.
     if chartable and categorical and 2 <= len(rows) <= 60:
         return {"format": "chart", "chart": chart, "reason": chart.get("reason", "series")}
 
-    return {"format": "table", "chart": None, "reason": "default_table"}
+    # Default for management: plain language, with a supporting chart when the
+    # shape warrants one — not a raw grid.
+    if len(rows) > 25:
+        return {"format": "table", "chart": None, "reason": "long_result"}
+    support = chart if (chartable and len(rows) >= 3) else None
+    return {"format": "narrative", "chart": support, "reason": "default_narrative"}
 
 
 # --- grounded narrative -----------------------------------------------------
@@ -241,23 +263,27 @@ def describe_result(
             label = col.replace("_", " ")
             return f"{label.capitalize()} is {_fmt(value)}{where}."
 
-    if fmt == "table" and len(rows) == 1:
+    if len(rows) == 1 and fmt in ("table", "narrative"):
         parts = [f"{c.replace('_', ' ')} {rows[0].get(c)}" for c in columns[:4]]
         return f"One matching record{where}: {', '.join(parts)}."
 
     label_key = plan.get("chart", {}).get("label_key") if plan.get("chart") else None
     if not label_key:
         label_key = categorical[0] if categorical else columns[0]
+    # Describe the leading numeric column: whoever wrote the query put the
+    # measure the question asked about first. The chart may plot several.
     measure = None
-    if plan.get("chart") and plan["chart"].get("value_keys"):
-        measure = plan["chart"]["value_keys"][0]
-    elif numeric:
+    if numeric:
         measure = numeric[0]
+    elif plan.get("chart") and plan["chart"].get("value_keys"):
+        measure = plan["chart"]["value_keys"][0]
 
     sentences: list[str] = []
-    sentences.append(
-        f"{len(rows)} row{'s' if len(rows) != 1 else ''} returned{where}."
-    )
+    # Management answers lead with the insight, not a row-count preamble.
+    if fmt not in ("narrative", "chart", "metric"):
+        sentences.append(
+            f"{len(rows)} row{'s' if len(rows) != 1 else ''} returned{where}."
+        )
 
     if measure:
         totals: dict[str, float] = {}
@@ -273,24 +299,67 @@ def describe_result(
             ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
             top_label, top_value = ranked[0]
             measure_label = measure.replace("_", " ")
+            ratio = is_ratio_column(measure)
 
-            sentences.append(
-                f"Total {measure_label} is {_fmt(grand)}."
-                if len(ranked) > 1
-                else f"{measure_label.capitalize()} is {_fmt(top_value)}."
-            )
+            if len(ranked) == 1:
+                sentences.append(f"{measure_label.capitalize()} is {_fmt(top_value)}.")
+            elif ratio:
+                # A rate has a range, not a total.
+                sentences.append(
+                    f"{measure_label.capitalize()} runs from {_fmt(ranked[-1][1])} to "
+                    f"{_fmt(top_value)} across the {len(ranked)} rows."
+                )
+            else:
+                sentences.append(f"Total {measure_label} is {_fmt(grand)}.")
 
             if len(ranked) > 1:
-                share = (top_value / grand * 100) if grand else 0
+                share = (top_value / grand * 100) if grand and not ratio else 0
                 sentences.append(
-                    f"{top_label} leads with {_fmt(top_value)}"
-                    + (f" ({share:.0f}% of the total)." if grand else ".")
+                    f"{top_label} is highest at {_fmt(top_value)}"
+                    + (f" ({share:.0f}% of the total)." if share else ".")
                 )
                 bottom_label, bottom_value = ranked[-1]
                 if bottom_label != top_label:
                     sentences.append(
                         f"{bottom_label} is lowest at {_fmt(bottom_value)}."
                     )
+
+            # "Most revenue and profit" is two questions. When the result also
+            # carries a rate, the ranking on it is the other half of the answer.
+            companion = next(
+                (c for c in numeric if c != measure and is_ratio_column(c)), None
+            )
+            if companion and len(rows) > 1:
+                by_companion: dict[str, float] = {}
+                for row in rows:
+                    key = str(row.get(label_key, "")).strip() or "(blank)"
+                    val = _to_number(row.get(companion))
+                    if val is not None:
+                        by_companion.setdefault(key, val)
+                if len(by_companion) > 1:
+                    ordered = sorted(by_companion.items(), key=lambda kv: kv[1], reverse=True)
+                    sentences.append(
+                        f"On {companion.replace('_', ' ')}, {ordered[0][0]} leads at "
+                        f"{_fmt(ordered[0][1])} and {ordered[-1][0]} trails at "
+                        f"{_fmt(ordered[-1][1])}."
+                    )
+
+    if not sentences:
+        key = categorical[0] if categorical else columns[0]
+        values = [
+            str(row.get(key, "")).strip()
+            for row in rows[:8]
+            if str(row.get(key, "")).strip()
+        ]
+        if values:
+            label = key.replace("_", " ")
+            if len(values) == 1:
+                joined = values[0]
+            else:
+                joined = ", ".join(values[:-1]) + f" and {values[-1]}"
+            more = f" ({len(rows) - len(values)} more)" if len(rows) > len(values) else ""
+            return f"The {label} values{where} are {joined}{more}."
+        return f"{len(rows)} matching row{'s' if len(rows) != 1 else ''}{where}."
 
     return " ".join(sentences)
 
@@ -306,7 +375,15 @@ Rules:
 - Lead with the direct answer to the question.
 - Mention the most important figure and any clear outlier.
 - No markdown, no bullet points, no preamble like "Based on the data".
-- If the rows do not answer the question, say so plainly.
+- If the question implies a threshold (stockouts, missed targets, unusually high
+  rates) and no row crosses it, say so AND still give the figures: name the
+  highest and the lowest. "The data does not show X" on its own is not an answer
+  when the rows carry the measure asked about.
+- Only say the rows cannot answer the question when the measure it asks about is
+  genuinely absent from them.
+- Requests for a bar, line, or pie chart are presentation only. Never refuse an
+  answer because the user asked for a chart type — summarise the figures in the
+  rows anyway. Chart rendering is handled outside your reply.
 """
 
 
@@ -352,8 +429,23 @@ def sanitize_narrative(text: str) -> str:
 # "why" question cannot be answered by one SELECT and a summary of its rows, and
 # a request for advice is not answered by rows at all. Both need the diagnostic
 # path, which compares periods and attributes the change before writing.
+# Meta questions (identity, how the product works) never touch the data.
 
-QuestionIntent = Literal["diagnostic", "advisory", "factual"]
+QuestionIntent = Literal["diagnostic", "advisory", "factual", "meta"]
+
+#: About the product / assistant — not the business data.
+_META_PATTERNS = (
+    r"\b(?:which|what)\s+model\s+(?:are\s+you|do\s+you\s+use|is\s+this|am\s+i\s+talking)\b",
+    r"\btell\s+me\s+which\s+model\s+you\s+are\b",
+    r"\bwho\s+are\s+you\b",
+    r"\bwhat\s+are\s+you\b",
+    r"\bare\s+you\s+(?:an?\s+)?(?:ai|llm|gpt|claude|gemini|chat\s*gpt|a\s+bot|a\s+model)\b",
+    r"\bwhat\s+(?:llm|ai\s+(?:model|provider)|language\s+model)\s+(?:do\s+you|are\s+you|is\s+this)\b",
+    r"\bhow\s+(?:do\s+you\s+work|does\s+this\s+(?:app|tool|product|platform)\s+work)\b",
+    r"\bwhat\s+can\s+you\s+(?:do|help(?:\s+me|\s+us)?)\b",
+    r"\bhelp\s+me\s+(?:use|with)\s+(?:this|the)\s+(?:app|tool|product|platform)?\b",
+    r"\b(?:introduce\s+yourself|your\s+(?:name|role|purpose))\b",
+)
 
 #: Asking what caused a movement.
 _DIAGNOSTIC_PATTERNS = (
@@ -429,14 +521,152 @@ def mentions_movement(question: str) -> bool:
     return any(f" {w} " in q or f" {w}?" in q or f" {w}," in q for w in _MOVEMENT_WORDS)
 
 
-def classify_intent(question: str) -> QuestionIntent:
-    """Diagnostic, advisory, or an ordinary factual lookup.
+def looks_like_followup(question: str) -> bool:
+    """Short continuations that only make sense with the prior question."""
+    q = question.lower().strip()
+    if not q:
+        return False
+    words = re.findall(r"[a-z0-9']+", q)
+    if re.search(
+        r"(?:as|in|like)\s+(?:a\s+)?(?:bar|line|pie)\s*charts?|"
+        r"^(?:show|make|draw|plot|render).*(?:bar|line|pie)\s*charts?|"
+        r"^(?:bar|line|pie)\s*charts?$",
+        q,
+    ):
+        return True
+    if len(words) <= 8 and re.search(
+        r"^\s*(?:what|how)\s+about\b|"
+        r"^\s*and\s+(?:the\s+|for\s+|by\s+)?|"
+        r"^\s*(?:the\s+)?(?:least|most|lowest|highest|worst|best|same)\b|"
+        r"^\s*same\s+(?:for|but|with|in)\b|"
+        r"^\s*(?:instead|vice\s+versa|opposite)\b|"
+        r"\b(?:those|them|that|it)\b",
+        q,
+    ):
+        return True
+    return len(words) <= 4
 
-    Advisory wins when both match: "why did revenue fall and what do we do"
-    still needs the diagnosis, and the advisory path performs one anyway.
+
+def expand_question_with_context(
+    question: str,
+    previous_question: str | None,
+) -> str:
+    """Resolve a follow-up into a standalone question the SQL path can answer.
+
+    Factual queries used to see only the bare follow-up ("what about the least?"),
+    which has no measure or period — so the model failed or dumped untargeted rows.
     """
+    q = (question or "").strip()
+    prev = (previous_question or "").strip()
+    if not q or not prev or not looks_like_followup(q):
+        return q
+
+    # "as a bar chart" / "show it as a line chart" — same analysis, new presentation.
+    if re.search(
+        r"(?i)(?:as|in|like)\s+(?:a\s+)?(?:bar|line|pie)\s*charts?|"
+        r"(?:show|make|draw|plot|render).*(?:bar|line|pie)\s*charts?|"
+        r"^(?:bar|line|pie)\s*charts?$",
+        q,
+    ):
+        chart_word = "bar"
+        if re.search(r"(?i)\bline\b", q):
+            chart_word = "line"
+        elif re.search(r"(?i)\bpie\b", q):
+            chart_word = "pie"
+        base = re.sub(
+            r"(?i)\s*(?:as|in)\s+(?:a\s+)?(?:bar|line|pie)\s*charts?\s*$",
+            "",
+            prev,
+        ).strip(" ?")
+        return f"{base} as a {chart_word} chart"
+
+    rewritten = q
+    # Flip ranking language so "the least" inherits "highest selling… in June".
+    flips = (
+        (r"\bhighest\b", "lowest"),
+        (r"\bhigh(?:er|est)?\s+selling\b", "lowest selling"),
+        (r"\btop\b", "bottom"),
+        (r"\bmost\b", "least"),
+        (r"\bbest\b", "worst"),
+        (r"\blowest\b", "highest"),
+        (r"\blow(?:er|est)?\s+selling\b", "highest selling"),
+        (r"\bbottom\b", "top"),
+        (r"\bleast\b", "most"),
+        (r"\bworst\b", "best"),
+    )
+    ql = q.lower()
+    if re.search(r"\b(?:least|lowest|worst|bottom)\b", ql):
+        base = prev
+        for pattern, repl in flips[:5]:
+            base = re.sub(pattern, repl, base, flags=re.IGNORECASE)
+        rewritten = base
+    elif re.search(r"\b(?:most|highest|best|top)\b", ql) and re.search(
+        r"\b(?:least|lowest|worst|bottom)\b", prev, flags=re.IGNORECASE
+    ):
+        base = prev
+        for pattern, repl in flips[5:]:
+            base = re.sub(pattern, repl, base, flags=re.IGNORECASE)
+        rewritten = base
+    elif re.match(r"(?i)^\s*(?:what|how)\s+about\b", q):
+        # "what about by region?" → keep prior and append the new clause.
+        clause = re.sub(r"(?i)^\s*(?:what|how)\s+about\s+", "", q).strip(" ?")
+        rewritten = f"{prev.rstrip(' ?')} — {clause}" if clause else prev
+
+    return rewritten
+
+
+def question_prompt_block(question: str, previous_question: str | None) -> str:
+    """User-message block for SQL generation, including follow-up context."""
+    resolved = expand_question_with_context(question, previous_question)
+    if previous_question and looks_like_followup(question):
+        return (
+            f"PREVIOUS QUESTION: {previous_question.strip()}\n"
+            f"FOLLOW-UP: {question.strip()}\n"
+            f"RESOLVED QUESTION: {resolved}\n\n"
+            f"Write SQL for the resolved question."
+        )
+    return f"Question: {resolved}"
+
+
+def classify_intent(question: str) -> QuestionIntent:
+    """Meta, diagnostic, advisory, or an ordinary factual lookup.
+
+    Meta is checked first so identity questions never hit the SQL path.
+    Advisory wins over diagnostic when both match: "why did revenue fall and
+    what do we do" still needs the diagnosis, and the advisory path performs
+    one anyway.
+    """
+    if _matches_any(question, _META_PATTERNS):
+        return "meta"
     if _matches_any(question, _ADVISORY_PATTERNS):
         return "advisory"
     if _matches_any(question, _DIAGNOSTIC_PATTERNS):
         return "diagnostic"
     return "factual"
+
+
+def answer_meta_question(
+    question: str,
+    *,
+    platform_name: str = "Cognitive Logic",
+) -> str:
+    """Plain-language reply for product/identity questions — no SQL, no rows.
+
+    Never names the underlying LLM, provider, or Settings profile.
+    """
+    name = (platform_name or "").strip() or "Cognitive Logic"
+    q = question.lower().strip()
+
+    identity = (
+        f"I'm {name}, your business intelligence assistant. "
+        "I turn questions about your connected datasets into answers. "
+        "I do not invent figures; every business number I give you comes from your data."
+    )
+
+    if re.search(r"\bwhat\s+can\s+you\b|\bhelp\b|\bhow\s+do\s+you\s+work\b", q):
+        return (
+            f"{identity} Ask in plain language — totals, trends, comparisons, or why a "
+            "figure moved — and I'll reply with a number, a short explanation, or a chart."
+        )
+
+    return identity

@@ -1,6 +1,12 @@
-# Environment
+# Environment — real secrets never belong in git
 .env
+.env.*
 .env.local
+.env.production
+.env.docker
+.env.*.local
+!.env.example
+!.env.production.example
 
 # Python
 __pycache__/
@@ -14,15 +20,33 @@ build/
 # Node
 node_modules/
 frontend/dist/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
 
-# Uploads & data
+# Uploads & customer data
 uploads/
+backend/uploads/
 *.csv
 *.xlsx
+*.xls
+*.parquet
+*.sqlite
+*.db
 
-# IDE
+# Cloud / TLS credentials
+*.pem
+*.p12
+*.pfx
+*.key
+credentials.json
+service-account*.json
+*-firebase-adminsdk*.json
+
+# IDE / agent local config
 .vscode/
 .idea/
+.claude/
 *.swp
 
 # OS
@@ -31,11 +55,6 @@ Thumbs.db
 
 # Logs
 *.log
-
-# Production env files (templates are committed, real values never are)
-.env.production
-.env.docker
-.env.*.local
 
 # Test artifacts
 backend/tests/.uploads/

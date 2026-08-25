@@ -4,6 +4,11 @@
   --shell-gap: 12px;
   --shell-top: 68px;
 
+  /* flow-root, not block: .shell-main clears the fixed topbar with a top
+     margin, and on a plain block that margin collapses through the shell —
+     pushing a 100svh box down by 68px and leaving the whole document
+     scrollable by exactly the height of the topbar. */
+  display: flow-root;
   min-height: 100svh;
   background: var(--cl-background);
   color: var(--cl-on-background);

@@ -135,14 +135,42 @@ def test_advice_questions_are_advisory(question):
 @pytest.mark.parametrize(
     "question",
     [
+        "tell me which model you are",
+        "who are you?",
+        "what are you",
+        "are you an AI",
+        "what can you do",
+        "how do you work",
+    ],
+)
+def test_identity_questions_are_meta(question):
+    assert classify_intent(question) == "meta"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
         "total revenue by region",
         "show me revenue by month",
         "list the top 10 products",
         "what is the total revenue",
+        "which model sells the most",
     ],
 )
 def test_ordinary_questions_still_take_the_sql_path(question):
     assert classify_intent(question) == "factual"
+
+
+def test_followup_least_inherits_prior_ranking_and_period():
+    from app.services.response_planner import expand_question_with_context
+
+    resolved = expand_question_with_context(
+        "what about the least?",
+        "what were my highest selling products in june",
+    )
+    assert "lowest" in resolved.lower() or "least" in resolved.lower()
+    assert "june" in resolved.lower()
+    assert "product" in resolved.lower()
 
 
 # --- diagnosis --------------------------------------------------------------

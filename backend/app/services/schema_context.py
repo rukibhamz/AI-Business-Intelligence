@@ -36,7 +36,102 @@ def build_schema_prompt(source: DataSource) -> str:
     span = schema_date_range(schema)
     if span:
         lines.append(f"\nThis dataset covers {span[0]} to {span[1]}.")
+
+    from app.services.schema_registry import parse_connection_config
+
+    primary = parse_connection_config(source).get("primary_table") or first_table_name(source)
+    chosen = next(
+        (t for t in schema["tables"] if t["name"] == primary), schema["tables"][0]
+    )
+    rules = build_measurement_rules(source, [c["name"] for c in chosen["columns"]])
+    if rules:
+        lines.append("\n" + rules)
     return "\n".join(lines)
+
+
+def build_measurement_rules(source: DataSource, columns: list[str]) -> str:
+    """Dataset-specific rules the model cannot infer from column names.
+
+    Tested against a live provider, the model summed a campaign budget that is
+    repeated on every row of its campaign (reporting 1.1x return where the true
+    figure is 152x), and divided returned units by the row count instead of by
+    units sold. Both are invisible in a schema listing, and both produce a
+    confident wrong number. The analytics engine already knows these rules;
+    this puts them in front of the planner too.
+    """
+    canon = canonical_columns(source, columns)
+    if not canon:
+        return ""
+
+    rules: list[str] = []
+
+    spend, campaign = canon.get("Marketing Spend"), canon.get("Campaign")
+    if spend and campaign:
+        rules.append(
+            f"- `{spend}` is a campaign budget. If the same value repeats across the rows "
+            f"of a `{campaign}`, it is ONE budget: count it with MAX({spend}) or "
+            f"SUM(DISTINCT {spend}) per campaign. SUM({spend}) multiplies it by the row "
+            "count and makes every campaign look unprofitable."
+        )
+
+    target = canon.get("Target")
+    if target:
+        dimension = canon.get("Store ID") or canon.get("Region")
+        date_col = _first(canon, "Date", "Timestamp")
+        holder = f" per `{dimension}`" if dimension else ""
+        rules.append(
+            f"- `{target}` is a target{holder}, not a per-row amount. Use MAX({target}) "
+            f"for the group, never SUM({target})."
+        )
+        if date_col:
+            rules.append(
+                f"- A target covers one period. Compare it against ONE period of actuals "
+                f"(e.g. WHERE SUBSTR({date_col}, 1, 7) = the latest month), not against "
+                "every period stacked together."
+            )
+
+    returns, quantity = canon.get("Returns"), canon.get("Quantity")
+    if returns and quantity:
+        rules.append(
+            f"- Return rate is SUM({returns}) / SUM({quantity}). `{returns}` counts units "
+            f"returned, so the denominator is units sold — never COUNT(*)."
+        )
+
+    stock, reorder = canon.get("Stock"), canon.get("Reorder Level")
+    if stock:
+        floor = (
+            f"at or below `{reorder}`" if reorder else "zero"
+        )
+        holder = canon.get("Store ID") or canon.get("Product")
+        grouped = f" per `{holder}`" if holder else ""
+        rules.append(
+            f"- `{stock}` is a stock level. A stockout is a level {floor} and nothing else — "
+            "a low level that never reaches it is thin cover, not a stockout. Excess is a level "
+            f"far above the typical one. Return AVG({stock}) and MIN({stock}){grouped} so both "
+            "can be judged; the question has an answer even when nothing is at zero."
+        )
+
+    revenue, cost, profit = canon.get("Revenue"), canon.get("Cost"), canon.get("Profit")
+    if revenue and cost and not profit:
+        rules.append(
+            f"- There is no profit column: profit is SUM({revenue}) - SUM({cost}), and "
+            f"margin is that divided by SUM({revenue})."
+        )
+
+    rules.append(
+        "- A question about which products / stores / regions / employees / campaigns / "
+        "segments do best groups by the column the question actually names — not by a "
+        "broader one. If it names several, group by the FIRST one only; do not combine "
+        "dimensions in one GROUP BY unless the question asks for the combination."
+    )
+    date_col = _first(canon, "Date", "Timestamp")
+    if date_col:
+        rules.append(
+            f"- A question about growth or a trend groups by period, e.g. "
+            f"SUBSTR({date_col}, 1, 7) AS period, and returns one row per period."
+        )
+
+    return "Measurement rules for this dataset:\n" + "\n".join(rules)
 
 
 def build_workspace_schema_prompt(sources: list[DataSource]) -> str:
@@ -59,6 +154,11 @@ def build_workspace_schema_prompt(sources: list[DataSource]) -> str:
         span = schema_date_range(schema)
         if span:
             lines.append(f"  (covers {span[0]} to {span[1]})")
+        rules = build_measurement_rules(
+            source, [c["name"] for c in schema["tables"][0]["columns"]]
+        )
+        if rules:
+            lines.append("  " + rules.replace("\n", "\n  "))
     return "\n".join(lines)
 
 
@@ -393,14 +493,23 @@ def metric_sql(
     target = canon.get("Target")
     if _asks(q, _ASK_TARGET) and target and revenue:
         dim = natural("target")
+        # A target describes a period. Stacking every period's revenue against
+        # one target reports 700% attainment and hides who is actually behind.
+        period_col = _first(canon, "Date", "Timestamp")
+        if dim and period_col and not where_sql:
+            where_sql = (
+                f" WHERE SUBSTR({quote_ident(period_col)}, 1, 7) = "
+                f"(SELECT MAX(SUBSTR({quote_ident(period_col)}, 1, 7)) "
+                f"FROM {quote_ident(table)})"
+            )
         if dim:
             selects = [
-                f"SUM({quote_ident(revenue)}) AS revenue",
-                f"MAX({quote_ident(target)}) AS target",
                 f"ROUND(SUM({quote_ident(revenue)}) * 100.0 / "
                 f"NULLIF(MAX({quote_ident(target)}), 0), 1) AS attainment_pct",
+                f"SUM({quote_ident(revenue)}) AS revenue",
+                f"MAX({quote_ident(target)}) AS target",
             ]
-            return _grouped(table, dim, selects, "4 ASC", limit, where_sql)
+            return _grouped(table, dim, selects, "2 ASC", limit, where_sql)
 
     days, rating = canon.get("Delivery Days"), canon.get("Rating")
     if _asks(q, _ASK_DELIVERY) and days:
@@ -555,6 +664,15 @@ def heuristic_sql(source: DataSource, question: str) -> str | None:
             f"ORDER BY 2 DESC LIMIT {limit}"
         )
 
+    # Management questions ("which campaigns give the best return?") name a
+    # metric and a dimension without ever saying "by". This runs before the
+    # generic dumps below, which would otherwise swallow "best" and "top".
+    targeted = metric_sql(
+        source, question, table, columns, limit=limit, where_sql=where_sql
+    )
+    if targeted:
+        return targeted
+
     if any(k in q for k in ("top", "highest", "best", "largest")) and order_col:
         return (
             f"SELECT * FROM {quote_ident(table)} "
@@ -563,14 +681,6 @@ def heuristic_sql(source: DataSource, question: str) -> str | None:
 
     if counting:
         return f"SELECT COUNT(*) AS row_count FROM {quote_ident(table)}"
-
-    # Management questions ("which products have high return rates?") name a
-    # metric and a dimension without saying "by". Try those before giving up.
-    targeted = metric_sql(
-        source, question, table, columns, limit=limit, where_sql=where_sql
-    )
-    if targeted:
-        return targeted
 
     return f"SELECT * FROM {quote_ident(table)} LIMIT {limit}"
 

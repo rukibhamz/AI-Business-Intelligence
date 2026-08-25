@@ -30,7 +30,7 @@ from app.services.ai_query import (
     pack_result,
 )
 from app.services.analytics import load_dataset
-from app.services.app_settings import get_ai_runtime, get_currency
+from app.services.app_settings import get_ai_runtime, get_currency, load_app_settings
 from app.services.diagnostics import (
     build_partial_context,
     build_recommendations,
@@ -43,7 +43,13 @@ from app.services.diagnostics import (
 )
 from app.services.profiling import schema_date_range
 from app.services.rate_limit import RateLimiter
-from app.services.response_planner import classify_intent, describe_result, plan_response
+from app.services.response_planner import (
+    answer_meta_question,
+    classify_intent,
+    describe_result,
+    expand_question_with_context,
+    plan_response,
+)
 from app.services.schema_context import pick_source_for_question, schema_as_json
 
 router = APIRouter(prefix="/queries", tags=["queries"])
@@ -252,11 +258,49 @@ async def run_query(
         sources = list(
             (await db.execute(select(DataSource).order_by(DataSource.id))).scalars().all()
         )
-        if not sources:
-            raise HTTPException(
-                status_code=400,
-                detail="No data sources ingested yet. Add a dataset under Data Sources first.",
-            )
+
+    intent = classify_intent(payload.natural_language)
+
+    if not sources and intent != "meta":
+        raise HTTPException(
+            status_code=400,
+            detail="No data sources ingested yet. Add a dataset under Data Sources first.",
+        )
+    if not sources:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Connect a dataset under Data Sources first. After that you can ask "
+                "about your business — or who I am — in plain language."
+            ),
+        )
+
+    # Product/identity questions never touch the warehouse — management gets a
+    # sentence, not SQL chrome.
+    if intent == "meta":
+        query = QueryModel(
+            user_id=current_user.id,
+            data_source_id=sources[0].id,
+            natural_language=payload.natural_language,
+            status="running",
+            session_id=payload.session_id,
+        )
+        db.add(query)
+        await db.commit()
+        await db.refresh(query)
+
+        settings_data = await load_app_settings(db)
+        answer = answer_meta_question(
+            payload.natural_language,
+            platform_name=str(settings_data.get("platform_name") or "Cognitive Logic"),
+        )
+        query.generated_sql = None
+        query.result_json = pack_result({"columns": [], "rows": [], "sql": None})
+        query.status = "completed"
+        query.response_format = "meta"
+        query.answer = answer
+        await _finalize(db, query, payload, current_user)
+        return query_to_response(query, mode="meta", explanation="Product answer — no data query.")
 
     query = QueryModel(
         user_id=current_user.id,
@@ -277,7 +321,6 @@ async def run_query(
         # answered by one SELECT over one period. Those go to the diagnostic
         # path, which compares periods and attributes the change before it
         # writes a word. Anything it cannot diagnose falls through to SQL.
-        intent = classify_intent(payload.natural_language)
         analysis = None
         if intent in ("diagnostic", "advisory"):
             analysis = await _analyse(
@@ -372,22 +415,30 @@ async def run_query(
 
         if pinned is not None:
             source = pinned
+            previous = await _previous_question(db, payload.session_id)
             sql, mode = await generate_sql(
                 source,
                 payload.natural_language,
                 api_key=runtime["api_key"],
                 model=runtime["model"],
                 base_url=runtime["base_url"],
+                previous_question=previous,
             )
         else:
+            previous = await _previous_question(db, payload.session_id)
             source, sql, mode = await generate_workspace_sql(
                 sources,
                 payload.natural_language,
                 api_key=runtime["api_key"],
                 model=runtime["model"],
                 base_url=runtime["base_url"],
+                previous_question=previous,
             )
             query.data_source_id = source.id
+
+        resolved_question = expand_question_with_context(
+            payload.natural_language, previous
+        )
 
         result = await execute_sql(source, sql)
         query.generated_sql = result["sql"]
@@ -398,7 +449,9 @@ async def run_query(
         rows = result["rows"]
 
         # Guardrail: choose how to present this before writing the answer.
-        plan = plan_response(payload.natural_language, columns, rows)
+        # Use the resolved follow-up so "what about the least?" still plans as
+        # a ranked product answer, not an empty/meta shape.
+        plan = plan_response(resolved_question, columns, rows)
         query.response_format = plan["format"]
 
         # When nothing matched, say so and name the range that does exist —
@@ -409,7 +462,7 @@ async def run_query(
             if span:
                 coverage = f"{source.name} covers {span[0]} to {span[1]}."
             answer = describe_result(
-                payload.natural_language,
+                resolved_question,
                 columns,
                 rows,
                 plan,
@@ -429,7 +482,7 @@ async def run_query(
             )
         else:
             answer = await generate_narrative(
-                payload.natural_language,
+                resolved_question,
                 columns,
                 rows,
                 api_key=runtime["api_key"],
@@ -440,7 +493,7 @@ async def run_query(
             )
             if not answer:
                 answer = describe_result(
-                    payload.natural_language, columns, rows, plan, source_name=source.name
+                    resolved_question, columns, rows, plan, source_name=source.name
                 )
         query.answer = answer
 

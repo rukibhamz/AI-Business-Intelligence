@@ -19,6 +19,7 @@ from app.services.analytics import (
     build_findings,
     build_overview,
     is_repeated_per_group,
+    profit_by,
     ratio_by,
     total_by_grain,
 )
@@ -68,10 +69,10 @@ ROWS = [
 ]
 
 
-def make_dataset(rows=None, mapping=None) -> Dataset:
+def make_dataset(rows=None, mapping=None, columns=None) -> Dataset:
     return Dataset(
         source=DataSource(id=1, name="NexaSphere", source_type="file"),
-        columns=COLUMNS,
+        columns=columns or COLUMNS,
         rows=rows if rows is not None else ROWS,
         total=len(rows if rows is not None else ROWS),
         truncated=False,
@@ -327,3 +328,80 @@ def test_named_dimensions_are_charted_before_broader_ones():
     chart_ids = {c["id"] for c in build_overview(dataset)["charts"]}
     for named in ("store_id", "region", "product", "campaign", "employee", "customer_segment"):
         assert f"by_{named}" in chart_ids, f"missing the {named} comparison"
+
+
+# --- profit and margin per segment ------------------------------------------
+
+
+def test_profit_by_ranks_on_revenue_and_reports_margin():
+    rows = [
+        row("2026-01-10", "Ikeja", "Volume", "C", 100, 10, 10000, 9000, 0),
+        row("2026-01-11", "Ikeja", "Earner", "C", 100, 10, 4000, 1000, 0),
+    ]
+    ranked = profit_by(make_dataset(rows), "product")
+    assert [r["label"] for r in ranked] == ["Volume", "Earner"]
+    assert ranked[0]["margin"] == pytest.approx(10.0)
+    assert ranked[1]["margin"] == pytest.approx(75.0)
+
+
+def test_the_revenue_leader_with_a_thin_margin_is_flagged():
+    """Ranking on revenue alone hides the line that sells hardest and earns least."""
+    rows = [
+        row("2026-01-10", "Ikeja", "Volume", "C", 100, 10, 10000, 9200, 0),
+        row("2026-02-10", "Ikeja", "Volume", "C", 100, 10, 10000, 9200, 0),
+        row("2026-01-11", "Ikeja", "Earner", "C", 100, 10, 4000, 1000, 0),
+        row("2026-02-11", "Ikeja", "Steady", "C", 100, 10, 3000, 1800, 0),
+    ]
+    findings = build_findings(make_dataset(rows))
+    mix = [f for f in findings if f["id"].endswith("-margin-mix")]
+    assert mix, "expected a revenue-leader / thin-margin finding"
+    assert "Volume" in mix[0]["title"]
+    assert "Earner" in mix[0]["body"]
+
+
+# --- inventory ---------------------------------------------------------------
+
+
+def test_excess_inventory_is_reported_not_just_stockouts():
+    rows = []
+    for i, store in enumerate(("Ikeja", "Abuja", "Kano")):
+        rows.append(
+            row(f"2026-01-1{i}", store, f"P{i}", "C", 100, 10, 1000, 600, 0)
+            | {"stock_on_hand": 100 if store != "Kano" else 900}
+        )
+    dataset = make_dataset(
+        rows,
+        mapping={**MAPPING, "stock_on_hand": "Stock"},
+        columns=[*COLUMNS, "stock_on_hand"],
+    )
+    excess = [f for f in build_findings(dataset) if f["id"].endswith("-excess-stock")]
+    assert excess and "Kano" in excess[0]["title"]
+
+
+def test_thin_cover_is_reported_before_it_reaches_zero():
+    rows = []
+    for i, store in enumerate(("Ikeja", "Abuja", "Kano")):
+        rows.append(
+            row(f"2026-01-1{i}", store, f"P{i}", "C", 100, 10, 1000, 600, 0)
+            | {"stock_on_hand": 500 if store != "Kano" else 20}
+        )
+    dataset = make_dataset(
+        rows,
+        mapping={**MAPPING, "stock_on_hand": "Stock"},
+        columns=[*COLUMNS, "stock_on_hand"],
+    )
+    thin = [f for f in build_findings(dataset) if f["id"].endswith("-thin-cover")]
+    assert thin and "Kano" in thin[0]["title"]
+
+
+# --- marketing ---------------------------------------------------------------
+
+
+def test_campaign_roi_flags_a_wide_spread_even_when_both_are_profitable():
+    rows = [
+        row("2026-01-10", "Ikeja", "P", "Efficient", 100, 10, 9000, 4000, 0),
+        row("2026-01-11", "Ikeja", "P", "Wasteful", 4000, 10, 9000, 4000, 0),
+    ]
+    roi = [f for f in build_findings(make_dataset(rows)) if f["id"].endswith("-campaign-roi")]
+    assert roi, "a nine-fold efficiency gap should not pass silently"
+    assert "Efficient" in roi[0]["title"] or "Efficient" in roi[0]["body"]

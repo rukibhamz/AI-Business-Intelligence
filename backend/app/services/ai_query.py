@@ -22,6 +22,8 @@ from app.services.diagnostics import (
 from app.services.response_planner import (
     NARRATIVE_SYSTEM,
     build_narrative_prompt,
+    expand_question_with_context,
+    question_prompt_block,
     sanitize_narrative,
 )
 from app.services.schema_context import (
@@ -63,6 +65,13 @@ Rules:
 - Prefer LIMIT 50 unless the user asks for a specific limit.
 - For MySQL / SQLite, use backticks for identifiers when needed.
 - Do not wrap the SQL in markdown fences.
+- Never answer questions about yourself, which model you are, or how the product
+  works with SQL. Those are not data questions — if asked, return exactly:
+  SELECT NULL AS unsupported WHERE 0;
+- When a PREVIOUS QUESTION is provided, treat short follow-ups
+  (e.g. "what about the least?", "and by region?") as continuing that analysis:
+  keep the same measure, dimensions, and time filters unless the follow-up
+  clearly changes them. Flip ranking words (highest↔lowest, most↔least, top↔bottom).
 """
     + DATE_RULES
     + AGGREGATION_RULES
@@ -83,6 +92,12 @@ Rules:
 - SELECT or WITH only. No writes, DDL, or multiple statements.
 - Use only tables/columns from the chosen source.
 - Prefer LIMIT 50 unless the user asks for a specific limit.
+- Never answer questions about yourself, which model you are, or how the product
+  works with SQL. Those are not data questions — if asked, pick any SOURCE_ID and
+  return: SELECT NULL AS unsupported WHERE 0;
+- When a PREVIOUS QUESTION is provided, treat short follow-ups as continuing that
+  analysis (same measure, dimensions, and time filters unless clearly changed).
+  Flip ranking words (highest↔lowest, most↔least, top↔bottom).
 """
     + DATE_RULES
     + AGGREGATION_RULES
@@ -96,17 +111,26 @@ async def generate_sql(
     api_key: str | None = None,
     model: str | None = None,
     base_url: str | None = None,
+    previous_question: str | None = None,
 ) -> tuple[str, str]:
     """Returns (sql, mode) where mode is 'openai' or 'heuristic'."""
     key = api_key if api_key is not None else settings.openai_api_key
     mdl = model or settings.openai_model
     url = base_url or settings.openai_base_url
+    resolved = expand_question_with_context(question, previous_question)
 
     if key:
-        sql = await _openai_sql(source, question, api_key=key, model=mdl, base_url=url)
+        sql = await _openai_sql(
+            source,
+            question,
+            api_key=key,
+            model=mdl,
+            base_url=url,
+            previous_question=previous_question,
+        )
         return sql, "openai"
 
-    plan = heuristic_plan(source, question)
+    plan = heuristic_plan(source, resolved)
     if not plan["sql"]:
         raise ValueError(
             "No OpenAI API key configured and could not build a heuristic query. "
@@ -122,6 +146,7 @@ async def generate_workspace_sql(
     api_key: str | None = None,
     model: str | None = None,
     base_url: str | None = None,
+    previous_question: str | None = None,
 ) -> tuple[DataSource, str, str]:
     """Pick a source + SQL for a workspace question. Returns (source, sql, mode)."""
     if not sources:
@@ -130,22 +155,35 @@ async def generate_workspace_sql(
     key = api_key if api_key is not None else settings.openai_api_key
     mdl = model or settings.openai_model
     url = base_url or settings.openai_base_url
+    resolved = expand_question_with_context(question, previous_question)
 
     if key and len(sources) > 1:
         source_id, sql = await _openai_workspace_sql(
-            sources, question, api_key=key, model=mdl, base_url=url
+            sources,
+            question,
+            api_key=key,
+            model=mdl,
+            base_url=url,
+            previous_question=previous_question,
         )
         by_id = {s.id: s for s in sources}
-        source = by_id.get(source_id) or pick_source_for_question(sources, question) or sources[0]
+        source = by_id.get(source_id) or pick_source_for_question(sources, resolved) or sources[0]
         return source, sql, "openai"
 
     if key:
-        source = sources[0]
-        sql = await _openai_sql(source, question, api_key=key, model=mdl, base_url=url)
+        source = pick_source_for_question(sources, resolved) or sources[0]
+        sql = await _openai_sql(
+            source,
+            question,
+            api_key=key,
+            model=mdl,
+            base_url=url,
+            previous_question=previous_question,
+        )
         return source, sql, "openai"
 
-    source = pick_source_for_question(sources, question) or sources[0]
-    plan = heuristic_plan(source, question)
+    source = pick_source_for_question(sources, resolved) or sources[0]
+    plan = heuristic_plan(source, resolved)
     if not plan["sql"]:
         raise ValueError(
             "No OpenAI API key configured and could not build a heuristic query. "
@@ -161,11 +199,13 @@ async def _openai_sql(
     api_key: str,
     model: str,
     base_url: str,
+    previous_question: str | None = None,
 ) -> str:
     schema_text = build_schema_prompt(source)
+    ask = question_prompt_block(question, previous_question)
     content = await _chat_completion(
         system=SYSTEM_PROMPT,
-        user=f"{schema_text}\n\nQuestion: {question}\n\nSQL:",
+        user=f"{schema_text}\n\n{ask}\n\nSQL:",
         api_key=api_key,
         model=model,
         base_url=base_url,
@@ -180,11 +220,13 @@ async def _openai_workspace_sql(
     api_key: str,
     model: str,
     base_url: str,
+    previous_question: str | None = None,
 ) -> tuple[int, str]:
     catalog = build_workspace_schema_prompt(sources)
+    ask = question_prompt_block(question, previous_question)
     content = await _chat_completion(
         system=WORKSPACE_SYSTEM_PROMPT,
-        user=f"{catalog}\n\nQuestion: {question}",
+        user=f"{catalog}\n\n{ask}",
         api_key=api_key,
         model=model,
         base_url=base_url,
@@ -192,8 +234,9 @@ async def _openai_workspace_sql(
     content = _strip_sql_fences(content)
     source_match = re.search(r"SOURCE_ID\s*:\s*(\d+)", content, flags=re.IGNORECASE)
     sql_match = re.search(r"SQL\s*:\s*(.+)", content, flags=re.IGNORECASE | re.DOTALL)
+    resolved = expand_question_with_context(question, previous_question)
     if not source_match or not sql_match:
-        picked = pick_source_for_question(sources, question) or sources[0]
+        picked = pick_source_for_question(sources, resolved) or sources[0]
         return picked.id, content.strip()
     return int(source_match.group(1)), sql_match.group(1).strip()
 

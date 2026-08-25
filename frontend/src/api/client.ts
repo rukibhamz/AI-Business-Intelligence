@@ -64,7 +64,7 @@ export interface QueryResult {
 }
 
 /** How the UI should present an answer — chosen server-side per question. */
-export type ResponseFormat = 'metric' | 'narrative' | 'chart' | 'table' | 'empty' | 'diagnostic'
+export type ResponseFormat = 'metric' | 'narrative' | 'chart' | 'table' | 'empty' | 'diagnostic' | 'meta'
 
 /** One segment's share of a measured change. */
 export interface DriverContribution {

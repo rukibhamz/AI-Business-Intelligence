@@ -106,6 +106,56 @@ AI-Business-Intelligence/
       implementation-neutral label ("Thinking…" → "Working through your data…")
 - [x] **Network errors read as network errors** — a dropped request rendered the
       raw "Failed to fetch"; it now says the server could not be reached
+- [x] **Offline planner understands management questions** (`schema_context.metric_sql`)
+      — the case study's questions name a metric and a dimension without ever
+      saying "by" ("Which products have unusually high return rates?"), so all
+      nine fell to `SELECT * LIMIT 10` when no AI key was set. They are now
+      planned from the canonical field mapping: return rate, campaign ROI (with
+      a repeated budget counted once), delivery days and rating, stock cover,
+      target attainment scoped to the latest period, and revenue/profit/margin
+      by any named dimension. Verified end to end on all nine
+- [x] **An untargeted answer says so** — when the planner cannot target the
+      question the reply states that these are sample rows, rather than
+      summarising an arbitrary column as though it answered
+- [x] **Profit alongside revenue everywhere** — dimension breakdowns carry both
+      series, and a new finding names the segment that leads on revenue while
+      earning the thinnest margin (`-margin-mix`)
+- [x] **Inventory beyond zero** — findings for cover below the reorder level or
+      far under the typical level, and for excess stock sitting on capital
+- [x] **Campaign ROI on spread, not just break-even** — a 10x efficiency gap
+      between two profitable campaigns used to pass silently; ROI per campaign
+      is also charted
+- [x] **Targets compared period for period** — a target repeated on every row
+      describes a period, so attainment reads the latest period against it, and
+      locations with no rows in that period are excluded rather than reported at
+      0%. Previously showed 541% on six months of data
+- [x] **Rates are never summed, mixed, or drawn as a pie** — "total return rate"
+      is not a figure, a rate does not share an axis with a count, and rates are
+      not slices of a whole
+- [x] **Measurement rules in the SQL prompt** (`schema_context.build_measurement_rules`)
+      — validated against the configured provider (Mistral `mistral-medium-latest`),
+      the model summed a campaign budget repeated on every row (reporting 1.1x
+      return where the true figure is 152x), divided returned units by the row
+      count instead of units sold (30% vs 14.5%), and stacked six months of
+      revenue against a one-period target. None of that is visible in a schema
+      listing, so the prompt now carries the dataset's own measurement rules,
+      built from the canonical mapping. Re-tested live: 9 of 9 brief questions
+      correct, matching the findings engine figure for figure
+- [x] **Answers stopped dismissing questions they could answer** — "The data does
+      not show stockouts or excess inventory" was returned beside a chart of the
+      stock levels. The narrative prompt now requires the figures either way:
+      when nothing crosses the threshold the answer says so *and* names the
+      highest and lowest. A stock rule also defines what a stockout is, so a
+      low-but-nonzero level is reported as thin cover, not a stockout
+- [x] **Result charts label their series** — `ResultChart` rendered no legend at
+      all, so three bars per group were unreadable. Legend on bar and line
+      whenever there is more than one series
+- [x] **A hyphen is not a date** — `_looks_temporal` treated any first value
+      containing "-" as temporal, so "Abuja-Central" drew a trend line across
+      four unrelated stores. Labels now have to parse as periods, and all of
+      them, not just the first
+- [x] **Averages share an axis with what they average** — avg stock and lowest
+      stock are both stock; only percentages and 1-5 ratings get their own scale
 - [x] **Chart-type fix:** a date axis is never a pie chart
 - [x] **Heuristic planner learned GROUP BY** — "revenue by region" now aggregates
       by region instead of dumping rows sorted by revenue; "over time" groups by
@@ -407,6 +457,7 @@ values are still at their defaults.
 
 | Date | Agent/Human | Work Done |
 |------|-------------|-----------|
+| 2026-08-25 | Agent | Management answers: meta intent (no SQL), prefer narrative, quiet ⋯ tools |
 | 2026-08-25 | Agent | Multi AI provider profiles (priority + active switch); fix connection test feedback |
 | 2026-08-25 | Agent | Documented free-tier deploy plan (Vercel / Supabase / Render) in handoff §6 |
 | 2026-08-25 | Agent | Ask AI: ChatGPT/Claude-style composer; workspace-wide queries (no source picker) |
