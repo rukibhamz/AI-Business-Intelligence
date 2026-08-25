@@ -59,7 +59,18 @@ class DataSourceResponse(BaseModel):
     updated_at: datetime
     field_mapping: dict[str, str] | None = None
     mapping_status: str | None = None
+    #: "ai" when the model mapped these columns, "heuristic" for name matching.
+    mapping_source: str | None = None
+    #: Fields two or more columns claimed; the extras were unmapped.
+    mapping_conflicts: list[str] | None = None
+    #: Every table this source exposes; analytics reads `primary_table`.
+    tables: list[str] = []
+    primary_table: str | None = None
     row_count: int | None = None
+
+
+class PrimaryTableUpdate(BaseModel):
+    table: str = Field(..., min_length=1, max_length=128)
 
 
 class FieldMappingUpdate(BaseModel):
@@ -111,6 +122,52 @@ class ChartRecommendation(BaseModel):
     reason: str | None = None
 
 
+class DriverContribution(BaseModel):
+    """One segment's share of a measured change."""
+
+    dimension: str
+    label: str
+    current: float
+    previous: float
+    change: float
+    change_pct: float | None = None
+    #: Percent of the total movement across all segments, always positive.
+    share: float
+    direction: str
+
+
+class Recommendation(BaseModel):
+    """An action the evidence supports, with the figure that justifies it."""
+
+    title: str
+    detail: str
+    basis: str = ""
+    priority: str = "next"
+    kind: str = "model"
+
+
+class Diagnosis(BaseModel):
+    """Why a measure moved: the comparison, the drivers, the supporting factors."""
+
+    measure: str
+    measure_label: str
+    direction: str
+    current: float
+    previous: float
+    change: float
+    change_pct: float | None = None
+    period_label: str
+    previous_label: str
+    granularity: str
+    dimension: str | None = None
+    concentration: float | None = None
+    drivers: list[DriverContribution] = []
+    factors: list[dict[str, Any]] = []
+    series: list[dict[str, Any]] = []
+    rows_analyzed: int = 0
+    truncated: bool = False
+
+
 class QueryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -129,6 +186,10 @@ class QueryResponse(BaseModel):
     answer: str | None = None
     #: How the UI should present this answer.
     response_format: str | None = None
+    #: Present only for "why" questions: the measured explanation of the move.
+    diagnosis: Diagnosis | None = None
+    #: Actions derived from that evidence. Empty for ordinary questions.
+    recommendations: list[Recommendation] = []
 
 
 class QueryRunResponse(QueryResponse):
@@ -177,18 +238,51 @@ class ColorSchemeOption(BaseModel):
     label: str
 
 
+class LlmProviderPublic(BaseModel):
+    id: str
+    label: str
+    provider: str
+    model: str
+    base_url: str
+    priority: int = 1
+    enabled: bool = True
+    api_key_set: bool = False
+    api_key_masked: str | None = None
+
+
+class LlmProviderUpdate(BaseModel):
+    id: str | None = None
+    label: str | None = Field(None, max_length=80)
+    provider: str | None = None
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
+    priority: int | None = Field(None, ge=1, le=100)
+    enabled: bool | None = None
+
+
+class CurrencyOption(BaseModel):
+    code: str
+    label: str
+    symbol: str
+
+
 class AppSettingsPublic(BaseModel):
     llm_provider: str
     openai_model: str
     openai_base_url: str
     api_key_set: bool
     api_key_masked: str | None = None
+    llm_providers: list[LlmProviderPublic] = []
+    active_provider_id: str | None = None
     platform_name: str
     platform_tagline: str
     logo_url: str | None = None
     color_scheme: str
     color_schemes: list[ColorSchemeOption] = []
     providers: list[str] = []
+    currency: str = "NGN"
+    currencies: list[CurrencyOption] = []
 
 
 class AppSettingsUpdate(BaseModel):
@@ -196,12 +290,16 @@ class AppSettingsUpdate(BaseModel):
     openai_model: str | None = None
     openai_api_key: str | None = None
     openai_base_url: str | None = None
+    llm_providers: list[LlmProviderUpdate] | None = None
+    active_provider_id: str | None = None
     platform_name: str | None = Field(None, min_length=1, max_length=80)
     platform_tagline: str | None = Field(None, max_length=120)
     color_scheme: str | None = None
+    currency: str | None = Field(None, min_length=3, max_length=3)
 
 
 class ConnectionTestRequest(BaseModel):
+    provider_id: str | None = None
     llm_provider: str | None = None
     openai_model: str | None = None
     openai_api_key: str | None = None
@@ -294,3 +392,28 @@ class FindingsResponse(BaseModel):
     findings: list[Finding] = []
     available_sources: list[SourceSummary] = []
     errors: list[str] = []
+
+
+class ConversationSummary(BaseModel):
+    id: str
+    title: str
+    message_count: int
+    created_at: datetime
+    updated_at: datetime
+    last_question: str | None = None
+    last_answer: str | None = None
+    #: True for questions asked before conversations existed.
+    is_legacy: bool = False
+
+
+class ConversationDetail(BaseModel):
+    id: str
+    title: str
+    message_count: int
+    created_at: datetime
+    updated_at: datetime
+    messages: list[QueryResponse] = []
+
+
+class ConversationUpdate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=120)

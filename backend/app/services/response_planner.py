@@ -16,7 +16,7 @@ from typing import Any, Literal
 
 from app.services.chart_recommend import recommend_chart
 
-ResponseFormat = Literal["metric", "narrative", "chart", "table", "empty"]
+ResponseFormat = Literal["metric", "narrative", "chart", "table", "empty", "diagnostic"]
 
 # --- question intent cues ---------------------------------------------------
 
@@ -136,14 +136,30 @@ def _fmt(value: float) -> str:
 # --- format selection -------------------------------------------------------
 
 
+def is_blank_result(columns: list[str], rows: list[dict[str, Any]]) -> bool:
+    """True when the query matched nothing.
+
+    An aggregate over zero rows still returns one row — `SUM(x)` yields NULL —
+    so "no rows" and "one row of NULLs" mean the same thing to a reader.
+    """
+    if not columns or not rows:
+        return True
+    return all(
+        row.get(col) is None or str(row.get(col)).strip() == ""
+        for row in rows
+        for col in columns
+    )
+
+
 def plan_response(
     question: str,
     columns: list[str],
     rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Return {format, chart, reason} for a result set."""
-    if not columns or not rows:
-        return {"format": "empty", "chart": None, "reason": "no_rows"}
+    if is_blank_result(columns, rows):
+        reason = "no_rows" if not rows else "null_aggregate"
+        return {"format": "empty", "chart": None, "reason": reason}
 
     numeric = _numeric_columns(columns, rows)
     categorical = [c for c in columns if c not in numeric]
@@ -201,13 +217,17 @@ def describe_result(
     plan: dict[str, Any],
     *,
     source_name: str | None = None,
+    coverage: str | None = None,
 ) -> str:
     """A plain-language answer built only from the returned rows."""
-    if not rows or not columns:
-        return (
-            "That query ran successfully but returned no rows, so there is nothing "
-            "matching those criteria in the connected data."
+    if is_blank_result(columns, rows):
+        where = f" in {source_name}" if source_name else ""
+        message = (
+            f"Nothing{where} matches those criteria, so there is no figure to report."
         )
+        if coverage:
+            message += f" {coverage}"
+        return message
 
     numeric = _numeric_columns(columns, rows)
     categorical = [c for c in columns if c not in numeric]
@@ -296,12 +316,18 @@ def build_narrative_prompt(
     rows: list[dict[str, Any]],
     *,
     source_name: str | None = None,
+    currency: str | None = None,
     max_rows: int = 40,
 ) -> str:
     sample = rows[:max_rows]
     lines = [f"Question: {question}"]
     if source_name:
         lines.append(f"Data source: {source_name}")
+    if currency:
+        lines.append(
+            f"Currency: {currency}. Write money amounts in {currency}; "
+            "never use a different currency symbol."
+        )
     lines.append(f"Columns: {', '.join(columns)}")
     lines.append(f"Rows returned: {len(rows)}")
     if len(rows) > max_rows:
@@ -318,3 +344,99 @@ def sanitize_narrative(text: str) -> str:
     cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", cleaned)
     cleaned = re.sub(r"\s*\n\s*", " ", cleaned)
     return cleaned.strip()
+
+
+# --- question intent --------------------------------------------------------
+#
+# Format decides how an answer looks. Intent decides how it is *produced*: a
+# "why" question cannot be answered by one SELECT and a summary of its rows, and
+# a request for advice is not answered by rows at all. Both need the diagnostic
+# path, which compares periods and attributes the change before writing.
+
+QuestionIntent = Literal["diagnostic", "advisory", "factual"]
+
+#: Asking what caused a movement.
+_DIAGNOSTIC_PATTERNS = (
+    r"\bwhy\b",
+    r"\bwhat\s+(?:caused|drove|led\s+to|is\s+driving|are\s+driving|is\s+causing)\b",
+    r"\bwhat(?:'s|\s+is)\s+behind\b",
+    r"\bwhat\s+happened\b",
+    r"\breasons?\s+(?:for|behind|why)\b",
+    r"\broot\s+cause\b",
+    r"\bexplain\s+(?:the\s+)?(?:drop|fall|decline|decrease|dip|spike|jump|increase|rise|change|growth|loss)\b",
+    r"\b(?:driver|drivers)\s+of\b",
+    r"\bwhat\s+is\s+going\s+on\s+with\b",
+)
+
+#: Asking what to do about it.
+_ADVISORY_PATTERNS = (
+    r"\bwhat\s+(?:should|can|could|would|do)\s+(?:we|i|they|you|the\s+\w+)\b",
+    r"\bhow\s+(?:do|can|should|would|might)\s+(?:we|i|they|you)\b",
+    r"\bhow\s+to\s+\w+",
+    r"\brecommend\w*\b",
+    r"\bsuggest\w*\b",
+    r"\badvice\b",
+    r"\baction\s+plan\b",
+    r"\bnext\s+steps?\b",
+    r"\bwhat\s+now\b",
+    r"\b(?:ways?|steps?|ideas?|options?|plans?)\s+to\b",
+    r"\b(?:remediate|remedy|mitigate|turn\s+(?:this\s+)?around|course\s+correct)\b",
+    r"\b(?:fix|solve|address|reverse|stop|prevent|avoid|recover\s+from)\s+(?:this|it|that|the\b|these|our\b|another\b)",
+    r"\bhelp\s+(?:me|us)\s+\w+",
+    r"\bwhat\s+would\s+you\s+do\b",
+    r"\bshould\s+(?:we|i)\b",
+)
+
+#: Words that make a bare follow-up ("and the loss?") read as being about a move.
+_MOVEMENT_WORDS = (
+    "fall",
+    "fell",
+    "falling",
+    "drop",
+    "dropped",
+    "dropping",
+    "decline",
+    "declined",
+    "decrease",
+    "decreased",
+    "down",
+    "dip",
+    "slump",
+    "loss",
+    "losses",
+    "shrink",
+    "shrank",
+    "underperform",
+    "spike",
+    "surge",
+    "jump",
+    "jumped",
+    "rise",
+    "rose",
+    "growth",
+    "grew",
+    "up",
+)
+
+
+def _matches_any(question: str, patterns: tuple[str, ...]) -> bool:
+    q = question.lower().strip()
+    return any(re.search(p, q) for p in patterns)
+
+
+def mentions_movement(question: str) -> bool:
+    q = f" {question.lower().strip()} "
+    return any(f" {w} " in q or f" {w}?" in q or f" {w}," in q for w in _MOVEMENT_WORDS)
+
+
+def classify_intent(question: str) -> QuestionIntent:
+    """Diagnostic, advisory, or an ordinary factual lookup.
+
+    Advisory wins when both match: "why did revenue fall and what do we do"
+    still needs the diagnosis, and the advisory path performs one anyway.
+    """
+    if _matches_any(question, _ADVISORY_PATTERNS):
+        return "advisory"
+    if _matches_any(question, _DIAGNOSTIC_PATTERNS):
+        return "diagnostic"
+    return "factual"

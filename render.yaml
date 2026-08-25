@@ -1,0 +1,38 @@
+# Render blueprint for the API. The frontend goes to Vercel (see frontend/vercel.json)
+# and the database to Supabase/Neon — set DATABASE_URL to that connection string.
+services:
+  - type: web
+    name: ai-bi-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: SQL_ECHO
+        value: "false"
+      - key: EXPOSE_API_DOCS
+        value: "false"
+      - key: UPLOAD_DIR
+        value: /data/uploads
+      - key: SECRET_KEY
+        generateValue: true
+      # Set these in the Render dashboard — never commit them.
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+    disk:
+      # Free-tier instances have ephemeral filesystems; without a disk every
+      # uploaded CSV is lost on redeploy.
+      name: uploads
+      mountPath: /data
+      sizeGB: 1

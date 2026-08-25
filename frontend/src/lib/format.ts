@@ -1,17 +1,47 @@
 import type { KpiFormat } from '../api/client'
 
-const compactCurrency = new Intl.NumberFormat(undefined, {
-  style: 'currency',
-  currency: 'USD',
-  notation: 'compact',
-  maximumFractionDigits: 1,
-})
+/**
+ * The display currency is an admin setting, so the formatters are rebuilt
+ * whenever it changes rather than fixed at module load.
+ */
+export const DEFAULT_CURRENCY = 'NGN'
 
-const fullCurrency = new Intl.NumberFormat(undefined, {
-  style: 'currency',
-  currency: 'USD',
-  maximumFractionDigits: 2,
-})
+let currencyCode = DEFAULT_CURRENCY
+let compactCurrency = buildCurrencyFormat(currencyCode, true)
+let fullCurrency = buildCurrencyFormat(currencyCode, false)
+
+function buildCurrencyFormat(code: string, compact: boolean): Intl.NumberFormat {
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: code,
+      ...(compact
+        ? { notation: 'compact' as const, maximumFractionDigits: 1 }
+        : { maximumFractionDigits: 2 }),
+    })
+  } catch {
+    // An unknown code must not break every number on the page.
+    return new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: DEFAULT_CURRENCY,
+      ...(compact
+        ? { notation: 'compact' as const, maximumFractionDigits: 1 }
+        : { maximumFractionDigits: 2 }),
+    })
+  }
+}
+
+export function setCurrency(code: string | null | undefined) {
+  const next = (code || DEFAULT_CURRENCY).toUpperCase()
+  if (next === currencyCode) return
+  currencyCode = next
+  compactCurrency = buildCurrencyFormat(next, true)
+  fullCurrency = buildCurrencyFormat(next, false)
+}
+
+export function getCurrency(): string {
+  return currencyCode
+}
 
 const compactNumber = new Intl.NumberFormat(undefined, {
   notation: 'compact',

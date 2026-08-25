@@ -6,24 +6,53 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings as app_config
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import DataSource, Query as QueryModel, User
-from app.schemas import ChartRecommendation, QueryCreate, QueryResponse, QueryResultPayload
+from app.models import DataSource, User
+from app.models import Query as QueryModel
+from app.schemas import (
+    ChartRecommendation,
+    Diagnosis,
+    QueryCreate,
+    QueryResponse,
+    QueryResultPayload,
+    Recommendation,
+)
 from app.services.ai_query import (
+    UNTARGETED,
     execute_sql,
+    generate_diagnostic_answer,
     generate_narrative,
+    generate_partial_answer,
     generate_sql,
     generate_workspace_sql,
     pack_result,
 )
-from app.services.app_settings import get_ai_runtime
-from app.services.response_planner import describe_result, plan_response
+from app.services.analytics import load_dataset
+from app.services.app_settings import get_ai_runtime, get_currency
+from app.services.diagnostics import (
+    build_partial_context,
+    build_recommendations,
+    diagnose,
+    diagnosis_result_payload,
+    partial_result_payload,
+    render_advice,
+    render_diagnosis,
+    render_partial,
+)
+from app.services.profiling import schema_date_range
+from app.services.rate_limit import RateLimiter
+from app.services.response_planner import classify_intent, describe_result, plan_response
+from app.services.schema_context import pick_source_for_question, schema_as_json
 
 router = APIRouter(prefix="/queries", tags=["queries"])
 
+# Each run can call a paid AI provider, so cap it per user.
+_query_limiter = RateLimiter(limit=app_config.query_rate_limit_per_minute)
 
-def _to_response(
+
+def query_to_response(
     query: QueryModel,
     *,
     mode: str | None = None,
@@ -45,8 +74,25 @@ def _to_response(
     if result:
         plan = plan_response(query.natural_language, result.columns, result.rows)
         response_format = response_format or plan["format"]
-        if response_format in ("chart", "narrative") and plan.get("chart"):
+        if response_format in ("chart", "narrative", "diagnostic") and plan.get("chart"):
             chart = ChartRecommendation(**plan["chart"])
+
+    # A "why" answer carries its evidence with it, so History replays the
+    # drivers and the recommended actions, not just the sentence.
+    diagnosis: Diagnosis | None = None
+    recommendations: list[Recommendation] = []
+    if query.diagnosis_json:
+        try:
+            stored = json.loads(query.diagnosis_json)
+        except ValueError:
+            stored = {}
+        if isinstance(stored.get("diagnosis"), dict):
+            diagnosis = Diagnosis(**stored["diagnosis"])
+        recommendations = [
+            Recommendation(**item)
+            for item in stored.get("recommendations", [])
+            if isinstance(item, dict)
+        ]
 
     return QueryResponse(
         id=query.id,
@@ -62,7 +108,106 @@ def _to_response(
         session_id=query.session_id,
         answer=query.answer,
         response_format=response_format,
+        diagnosis=diagnosis,
+        recommendations=recommendations,
     )
+
+
+async def _previous_question(db: AsyncSession, session_id: str | None) -> str | None:
+    """The last thing asked in this chat.
+
+    "What should we do about it?" names no metric. The question before it does,
+    so a follow-up inherits its subject instead of guessing.
+    """
+    if not session_id:
+        return None
+    previous = (
+        await db.execute(
+            select(QueryModel)
+            .where(QueryModel.session_id == session_id)
+            .order_by(QueryModel.created_at.desc())
+            .limit(2)
+        )
+    ).scalars().all()
+    for item in previous:
+        if item.natural_language and item.status != "running":
+            return item.natural_language
+    return None
+
+
+async def _analyse(
+    sources: list[DataSource],
+    question: str,
+    *,
+    previous_question: str | None,
+    max_sources: int = 3,
+) -> tuple[DataSource, dict | None, dict | None] | None:
+    """Look for a source that can explain the move; settle for one that can't.
+
+    Returns `(source, diagnosis, None)` when a full period comparison is
+    possible. When it is not — no date column, one period, no mapped measure —
+    it returns `(source, None, context)`: the comparison the data *does*
+    support plus what is missing, which still answers the question honestly.
+    Only a workspace with nothing readable in it returns None.
+    """
+    ordered = list(sources)
+    if len(ordered) > 1:
+        preferred = pick_source_for_question(ordered, question)
+        if preferred is not None:
+            ordered = [preferred] + [s for s in ordered if s.id != preferred.id]
+
+    fallback: tuple[DataSource, dict | None, dict | None] | None = None
+
+    for source in ordered[:max_sources]:
+        try:
+            dataset = await load_dataset(source)
+        except Exception:  # an unreadable source should not sink the answer
+            continue
+
+        diagnosis = diagnose(dataset, question, previous_question=previous_question)
+        if diagnosis:
+            return source, diagnosis, None
+
+        if fallback is None:
+            context = build_partial_context(
+                dataset, question, previous_question=previous_question
+            )
+            if context:
+                fallback = (source, None, context)
+
+    return fallback
+
+
+async def _finalize(
+    db: AsyncSession,
+    query: QueryModel,
+    payload: QueryCreate,
+    current_user: User,
+) -> None:
+    """Persist the answer and materialize the chat thread History lists."""
+    from app.routes.conversations import ensure_conversation
+
+    opening = payload.natural_language
+    if payload.session_id:
+        first = (
+            await db.execute(
+                select(QueryModel)
+                .where(QueryModel.session_id == payload.session_id)
+                .order_by(QueryModel.created_at.asc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if first is not None:
+            opening = first.natural_language
+    await ensure_conversation(
+        db,
+        session_id=payload.session_id,
+        first_question=opening,
+        user_id=current_user.id,
+    )
+
+    await db.commit()
+    await db.refresh(query)
 
 
 @router.get("", response_model=list[QueryResponse])
@@ -76,7 +221,7 @@ async def list_queries(
     if data_source_id is not None:
         stmt = stmt.where(QueryModel.data_source_id == data_source_id)
     rows = list((await db.execute(stmt)).scalars().all())
-    return [_to_response(q) for q in rows]
+    return [query_to_response(q) for q in rows]
 
 
 @router.post("/run", response_model=QueryResponse, status_code=status.HTTP_201_CREATED)
@@ -85,6 +230,16 @@ async def run_query(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> QueryResponse:
+    allowed, retry_after = _query_limiter.check(str(current_user.id))
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Too many questions in a short period. Try again in {retry_after}s."
+            ),
+            headers={"Retry-After": str(retry_after)},
+        )
+
     pinned: DataSource | None = None
     sources: list[DataSource]
 
@@ -117,6 +272,104 @@ async def run_query(
     mode = "heuristic"
     try:
         runtime = await get_ai_runtime(db)
+
+        # "Why did revenue fall?" and "what do we do about it?" cannot be
+        # answered by one SELECT over one period. Those go to the diagnostic
+        # path, which compares periods and attributes the change before it
+        # writes a word. Anything it cannot diagnose falls through to SQL.
+        intent = classify_intent(payload.natural_language)
+        analysis = None
+        if intent in ("diagnostic", "advisory"):
+            analysis = await _analyse(
+                sources,
+                payload.natural_language,
+                previous_question=await _previous_question(db, payload.session_id),
+            )
+
+        if analysis is not None and analysis[1] is not None:
+            source, diagnosis, _ = analysis
+            query.data_source_id = source.id
+            # "Why" gets the explanation and a prompt to ask for the remedy;
+            # only a question that asked for advice gets handed the actions.
+            advisory = intent == "advisory"
+            candidates = build_recommendations(diagnosis) if advisory else []
+
+            answer, recommendations = await generate_diagnostic_answer(
+                payload.natural_language,
+                diagnosis,
+                advisory=advisory,
+                candidates=candidates,
+                api_key=runtime["api_key"],
+                model=runtime["model"],
+                base_url=runtime["base_url"],
+                source_name=source.name,
+                currency=await get_currency(db),
+            )
+            mode = "diagnostic+model" if answer else "diagnostic"
+            # The measured actions stand on their own; the model only rewords them.
+            if not recommendations:
+                recommendations = candidates
+            if not answer:
+                answer = (
+                    render_advice(diagnosis, recommendations, source_name=source.name)
+                    if advisory
+                    else render_diagnosis(diagnosis, source_name=source.name)
+                )
+
+            result = diagnosis_result_payload(diagnosis)
+            query.generated_sql = None
+            query.result_json = pack_result(result)
+            query.status = "completed"
+            query.response_format = "diagnostic"
+            query.answer = answer
+            query.diagnosis_json = json.dumps(
+                {"diagnosis": diagnosis, "recommendations": recommendations},
+                default=str,
+            )
+
+            explanation = (
+                f"Diagnosed from “{source.name}”: {diagnosis['period_label']} versus "
+                f"{diagnosis['previous_label']} across "
+                f"{diagnosis['rows_analyzed']:,} row(s)."
+            )
+            await _finalize(db, query, payload, current_user)
+            return query_to_response(query, mode=mode, explanation=explanation)
+
+        if analysis is not None and analysis[2] is not None:
+            # The data cannot support the comparison that was asked for. Say so
+            # and give what it does show — dropping back to "write a SELECT and
+            # summarise it" is what returned nothing for these questions.
+            source, _, context = analysis
+            query.data_source_id = source.id
+
+            answer = await generate_partial_answer(
+                payload.natural_language,
+                context,
+                api_key=runtime["api_key"],
+                model=runtime["model"],
+                base_url=runtime["base_url"],
+                source_name=source.name,
+                currency=await get_currency(db),
+            )
+            mode = "analysis+model" if answer else "analysis"
+            if not answer:
+                answer = render_partial(context, source_name=source.name)
+
+            result = partial_result_payload(context)
+            query.generated_sql = None
+            query.result_json = pack_result(result)
+            query.status = "completed"
+            query.response_format = "narrative" if result["rows"] else "empty"
+            query.answer = answer
+
+            explanation = (
+                f"Answered from “{source.name}” across "
+                f"{context['rows_analyzed']:,} row(s); a period comparison was "
+                "not available."
+            )
+            await _finalize(db, query, payload, current_user)
+            return query_to_response(query, mode=mode, explanation=explanation)
+
         if pinned is not None:
             source = pinned
             sql, mode = await generate_sql(
@@ -148,19 +401,47 @@ async def run_query(
         plan = plan_response(payload.natural_language, columns, rows)
         query.response_format = plan["format"]
 
-        answer = await generate_narrative(
-            payload.natural_language,
-            columns,
-            rows,
-            api_key=runtime["api_key"],
-            model=runtime["model"],
-            base_url=runtime["base_url"],
-            source_name=source.name,
-        )
-        if not answer:
+        # When nothing matched, say so and name the range that does exist —
+        # a model asked to summarise an empty result just says "no data".
+        coverage = None
+        if plan["format"] == "empty":
+            span = schema_date_range(schema_as_json(source))
+            if span:
+                coverage = f"{source.name} covers {span[0]} to {span[1]}."
             answer = describe_result(
-                payload.natural_language, columns, rows, plan, source_name=source.name
+                payload.natural_language,
+                columns,
+                rows,
+                plan,
+                source_name=source.name,
+                coverage=coverage,
             )
+        elif mode == UNTARGETED:
+            # The offline planner did not understand the question, so these are
+            # simply the first rows of the table. Summarising them as though
+            # they answered it is how a wrong number reaches a decision.
+            query.response_format = "table"
+            answer = (
+                f"I could not turn that question into a query without an AI model, so "
+                f"this is a sample of {source.name} rather than an answer. Add an AI key "
+                "under Settings, or ask for a specific measure and grouping — for "
+                "example “revenue by product” or “average delivery days by partner”."
+            )
+        else:
+            answer = await generate_narrative(
+                payload.natural_language,
+                columns,
+                rows,
+                api_key=runtime["api_key"],
+                model=runtime["model"],
+                base_url=runtime["base_url"],
+                source_name=source.name,
+                currency=await get_currency(db),
+            )
+            if not answer:
+                answer = describe_result(
+                    payload.natural_language, columns, rows, plan, source_name=source.name
+                )
         query.answer = answer
 
         explanation = (
@@ -176,9 +457,8 @@ async def run_query(
         await db.refresh(query)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    await db.commit()
-    await db.refresh(query)
-    return _to_response(query, mode=mode, explanation=explanation)
+    await _finalize(db, query, payload, current_user)
+    return query_to_response(query, mode=mode, explanation=explanation)
 
 
 @router.post("", response_model=QueryResponse, status_code=status.HTTP_201_CREATED)
@@ -205,7 +485,7 @@ async def create_query(
     db.add(query)
     await db.commit()
     await db.refresh(query)
-    return _to_response(query)
+    return query_to_response(query)
 
 
 @router.get("/{query_id}/export")
@@ -246,4 +526,4 @@ async def get_query(
     query = await db.get(QueryModel, query_id)
     if not query:
         raise HTTPException(status_code=404, detail="Query not found")
-    return _to_response(query)
+    return query_to_response(query)

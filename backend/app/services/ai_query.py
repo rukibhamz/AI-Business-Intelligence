@@ -11,6 +11,14 @@ import httpx
 
 from app.config import settings
 from app.models import DataSource
+from app.services.diagnostics import (
+    ADVISORY_SYSTEM,
+    DIAGNOSTIC_SYSTEM,
+    PARTIAL_SYSTEM,
+    build_evidence_prompt,
+    build_partial_prompt,
+    parse_advisory_json,
+)
 from app.services.response_planner import (
     NARRATIVE_SYSTEM,
     build_narrative_prompt,
@@ -19,14 +27,35 @@ from app.services.response_planner import (
 from app.services.schema_context import (
     build_schema_prompt,
     build_workspace_schema_prompt,
-    heuristic_sql,
+    heuristic_plan,
     pick_source_for_question,
 )
 from app.services.schema_registry import parse_connection_config
 from app.services.sql_sandbox import ensure_limit, validate_readonly_sql
 
+#: Mode reported when the offline planner fell back to a plain row dump. The
+#: rows are real, but they do not answer the question, and the answer says so.
+UNTARGETED = "heuristic-untargeted"
 
-SYSTEM_PROMPT = """You are a SQL expert for a business intelligence tool.
+DATE_RULES = """
+Working with dates:
+- Column hints in square brackets give the REAL range of values in the data.
+- Never invent a year. If the question names months or a season without a year
+  (e.g. "between March and May"), use the year(s) shown in the date range.
+- If the data spans several years and the question gives no year, cover them all
+  rather than picking one (e.g. filter on the month, not on a single year).
+- Dates are stored as text in ISO form, so string comparison works:
+  WHERE d >= '2026-03-01' AND d < '2026-06-01'.
+"""
+
+AGGREGATION_RULES = """
+Answering "how much / how many / total / average":
+- Return the aggregate itself, not the underlying rows.
+- Give the aggregate a readable alias, e.g. SUM(revenue) AS total_revenue.
+"""
+
+SYSTEM_PROMPT = (
+    """You are a SQL expert for a business intelligence tool.
 Given a database schema and a user question, return ONLY a single read-only SQL query.
 Rules:
 - SELECT or WITH only. No writes, DDL, or multiple statements.
@@ -35,8 +64,12 @@ Rules:
 - For MySQL / SQLite, use backticks for identifiers when needed.
 - Do not wrap the SQL in markdown fences.
 """
+    + DATE_RULES
+    + AGGREGATION_RULES
+)
 
-WORKSPACE_SYSTEM_PROMPT = """You are a SQL expert for a business intelligence workspace with multiple datasets.
+WORKSPACE_SYSTEM_PROMPT = (
+    """You are a SQL expert for a business intelligence workspace with multiple datasets.
 The user asks questions against ALL ingested data. You must:
 1. Choose exactly ONE SOURCE_ID from the catalog that best answers the question.
 2. Write a single read-only SQL query for that source only (no cross-source joins).
@@ -51,6 +84,9 @@ Rules:
 - Use only tables/columns from the chosen source.
 - Prefer LIMIT 50 unless the user asks for a specific limit.
 """
+    + DATE_RULES
+    + AGGREGATION_RULES
+)
 
 
 async def generate_sql(
@@ -70,13 +106,13 @@ async def generate_sql(
         sql = await _openai_sql(source, question, api_key=key, model=mdl, base_url=url)
         return sql, "openai"
 
-    sql = heuristic_sql(source, question)
-    if not sql:
+    plan = heuristic_plan(source, question)
+    if not plan["sql"]:
         raise ValueError(
             "No OpenAI API key configured and could not build a heuristic query. "
             "Set it in Settings or OPENAI_API_KEY in .env"
         )
-    return sql, "heuristic"
+    return plan["sql"], ("heuristic" if plan["targeted"] else UNTARGETED)
 
 
 async def generate_workspace_sql(
@@ -109,13 +145,13 @@ async def generate_workspace_sql(
         return source, sql, "openai"
 
     source = pick_source_for_question(sources, question) or sources[0]
-    sql = heuristic_sql(source, question)
-    if not sql:
+    plan = heuristic_plan(source, question)
+    if not plan["sql"]:
         raise ValueError(
             "No OpenAI API key configured and could not build a heuristic query. "
             "Set it in Settings or OPENAI_API_KEY in .env"
         )
-    return source, sql, "heuristic"
+    return source, plan["sql"], ("heuristic" if plan["targeted"] else UNTARGETED)
 
 
 async def _openai_sql(
@@ -199,9 +235,11 @@ def _strip_sql_fences(content: str) -> str:
     return content.strip()
 
 
-async def execute_sql(source: DataSource, sql: str, *, max_rows: int = 200) -> dict[str, Any]:
+async def execute_sql(
+    source: DataSource, sql: str, *, max_rows: int | None = None
+) -> dict[str, Any]:
     safe = validate_readonly_sql(sql)
-    safe = ensure_limit(safe, max_rows)
+    safe = ensure_limit(safe, max_rows or settings.max_query_rows)
 
     if source.source_type == "mysql":
         return await _exec_mysql(source, safe)
@@ -226,7 +264,7 @@ async def _exec_mysql(source: DataSource, sql: str) -> dict[str, Any]:
             await cur.execute(sql)
             rows_raw = await cur.fetchall()
             columns = [d[0] for d in (cur.description or [])]
-            rows = [dict(zip(columns, row)) for row in rows_raw]
+            rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
             # Serialize non-JSON types
             for row in rows:
                 for k, v in list(row.items()):
@@ -271,7 +309,7 @@ def _exec_file_sqlite(source: DataSource, sql: str) -> dict[str, Any]:
         cur = conn.execute(rewritten)
         rows_raw = cur.fetchall()
         columns = [d[0] for d in (cur.description or [])]
-        rows = [dict(zip(columns, row)) for row in rows_raw]
+        rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
     finally:
         conn.close()
 
@@ -322,7 +360,7 @@ def _insert_typed_rows(
 ) -> None:
     """Infer REAL vs TEXT per column so ORDER BY works on numeric CSV fields."""
     types = [_infer_sqlite_type(raw_rows, i) for i in range(len(cols))]
-    col_defs = ", ".join(f"`{c}` {t}" for c, t in zip(cols, types))
+    col_defs = ", ".join(f"`{c}` {t}" for c, t in zip(cols, types, strict=False))
     conn.execute(f"CREATE TABLE `{table}` ({col_defs})")
     placeholders = ", ".join("?" for _ in cols)
     typed_rows: list[list[Any]] = []
@@ -370,6 +408,7 @@ async def generate_narrative(
     model: str | None = None,
     base_url: str | None = None,
     source_name: str | None = None,
+    currency: str | None = None,
 ) -> str | None:
     """Ask the model to summarise the returned rows. None when unavailable.
 
@@ -382,7 +421,9 @@ async def generate_narrative(
 
     mdl = model or settings.openai_model
     url = base_url or settings.openai_base_url
-    prompt = build_narrative_prompt(question, columns, rows, source_name=source_name)
+    prompt = build_narrative_prompt(
+        question, columns, rows, source_name=source_name, currency=currency
+    )
 
     payload = {
         "model": mdl,
@@ -412,3 +453,123 @@ async def generate_narrative(
 
     cleaned = sanitize_narrative(content)
     return cleaned or None
+
+
+async def generate_diagnostic_answer(
+    question: str,
+    diagnosis: dict[str, Any],
+    *,
+    advisory: bool,
+    candidates: list[dict[str, str]] | None = None,
+    api_key: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    source_name: str | None = None,
+    currency: str | None = None,
+) -> tuple[str | None, list[dict[str, str]]]:
+    """Write up a measured diagnosis, and for advisory questions, the actions.
+
+    The model is given the computed evidence, never the raw rows, so it has
+    nothing to miscalculate. Returns (None, []) whenever it is unavailable or
+    replies with anything unusable — the caller then uses the deterministic
+    write-up, which says the same thing from the same numbers.
+    """
+    key = api_key if api_key is not None else settings.openai_api_key
+    if not key:
+        return None, []
+
+    mdl = model or settings.openai_model
+    url = base_url or settings.openai_base_url
+    prompt = build_evidence_prompt(
+        question,
+        diagnosis,
+        source_name=source_name,
+        currency=currency,
+        candidates=candidates if advisory else None,
+    )
+
+    payload = {
+        "model": mdl,
+        "temperature": 0.2,
+        "max_tokens": 700 if advisory else 300,
+        "messages": [
+            {"role": "system", "content": ADVISORY_SYSTEM if advisory else DIAGNOSTIC_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(
+                f"{url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            res.raise_for_status()
+            data = res.json()
+        content = data["choices"][0]["message"]["content"]
+    except Exception:
+        return None, []
+
+    if advisory:
+        answer, recommendations = parse_advisory_json(content)
+        return answer, recommendations
+
+    cleaned = sanitize_narrative(content)
+    return (cleaned or None), []
+
+
+async def generate_partial_answer(
+    question: str,
+    context: dict[str, Any],
+    *,
+    api_key: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    source_name: str | None = None,
+    currency: str | None = None,
+) -> str | None:
+    """Answer a "why" question the data cannot fully support.
+
+    The model is handed the comparison that does exist and an explicit list of
+    what is missing, so it can say what is answerable instead of the question
+    dead-ending. None when unavailable; the caller writes it up deterministically.
+    """
+    key = api_key if api_key is not None else settings.openai_api_key
+    if not key:
+        return None
+
+    payload = {
+        "model": model or settings.openai_model,
+        "temperature": 0.2,
+        "max_tokens": 320,
+        "messages": [
+            {"role": "system", "content": PARTIAL_SYSTEM},
+            {
+                "role": "user",
+                "content": build_partial_prompt(
+                    question, context, source_name=source_name, currency=currency
+                ),
+            },
+        ],
+    }
+    url = base_url or settings.openai_base_url
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            res = await client.post(
+                f"{url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            res.raise_for_status()
+            data = res.json()
+        content = data["choices"][0]["message"]["content"]
+    except Exception:
+        return None
+
+    return sanitize_narrative(content) or None

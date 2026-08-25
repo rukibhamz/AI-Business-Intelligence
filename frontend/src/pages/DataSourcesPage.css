@@ -321,15 +321,22 @@
 }
 
 .ds-primary {
-  padding: 8px 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 9px 16px;
   border: none;
   border-radius: var(--cl-radius);
   background: var(--cl-accent);
   color: var(--cl-on-accent);
-  font-size: 14px;
-  font-weight: 600;
+  font-family: var(--cl-font-body);
+  font-size: 13.5px;
+  font-weight: 700;
+  line-height: 1.2;
   cursor: pointer;
   box-shadow: var(--cl-shadow-level-1);
+  transition: background var(--cl-duration-fast) var(--cl-ease);
 }
 
 .ds-primary:hover:not(:disabled) {
@@ -339,6 +346,10 @@
 .ds-primary:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.ds-primary .material-symbols-outlined {
+  font-size: 17px;
 }
 
 .ds-side h2 {
@@ -486,4 +497,37 @@
 .ds-side h2 {
   font-size: 18px;
   letter-spacing: -0.02em;
+}
+
+
+/* ---- which table a multi-table source analyses ---- */
+.ds-table-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px 32px;
+  font-size: 11.5px;
+  color: var(--cl-on-surface-muted);
+}
+
+.ds-table-pick select {
+  max-width: 11rem;
+  padding: 3px 6px;
+  border: 1px solid var(--cl-border);
+  border-radius: var(--cl-radius-sm);
+  background: var(--cl-surface-container-lowest);
+  color: var(--cl-on-surface);
+  font-family: var(--cl-font-body);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ds-table-pick select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ds-table-count {
+  white-space: nowrap;
 }

@@ -31,6 +31,11 @@ export interface DataSource {
   updated_at: string
   field_mapping?: Record<string, string> | null
   mapping_status?: string | null
+  /** Every table the source exposes; analytics reads `primary_table`. */
+  tables?: string[]
+  primary_table?: string | null
+  /** "ai" when the model mapped these columns, "heuristic" for name matching. */
+  mapping_source?: string | null
   row_count?: number | null
 }
 
@@ -59,7 +64,50 @@ export interface QueryResult {
 }
 
 /** How the UI should present an answer — chosen server-side per question. */
-export type ResponseFormat = 'metric' | 'narrative' | 'chart' | 'table' | 'empty'
+export type ResponseFormat = 'metric' | 'narrative' | 'chart' | 'table' | 'empty' | 'diagnostic'
+
+/** One segment's share of a measured change. */
+export interface DriverContribution {
+  dimension: string
+  label: string
+  current: number
+  previous: number
+  change: number
+  change_pct: number | null
+  /** Percent of the total movement across all segments, always positive. */
+  share: number
+  direction: 'up' | 'down'
+}
+
+/** An action the evidence supports, with the figure that justifies it. */
+export interface Recommendation {
+  title: string
+  detail: string
+  basis: string
+  priority: 'now' | 'next' | 'watch'
+  kind: string
+}
+
+/** Why a measure moved: the comparison, the drivers, the supporting factors. */
+export interface Diagnosis {
+  measure: string
+  measure_label: string
+  direction: 'up' | 'down' | 'flat'
+  current: number
+  previous: number
+  change: number
+  change_pct: number | null
+  period_label: string
+  previous_label: string
+  granularity: string
+  dimension: string | null
+  concentration: number | null
+  drivers: DriverContribution[]
+  factors: { kind: string; detail: string }[]
+  series: { period: string; value: number }[]
+  rows_analyzed: number
+  truncated: boolean
+}
 
 export interface QueryRecord {
   id: number
@@ -76,6 +124,10 @@ export interface QueryRecord {
   /** Plain-language answer grounded in the returned rows. */
   answer?: string | null
   response_format?: ResponseFormat | null
+  /** Present only for "why" questions: the measured explanation of the move. */
+  diagnosis?: Diagnosis | null
+  /** Actions derived from that evidence. Empty for ordinary questions. */
+  recommendations?: Recommendation[]
 }
 
 export interface ChartRecommendation {
@@ -99,6 +151,27 @@ export interface Dashboard {
   widgets: DashboardWidget[]
   created_at: string
   updated_at: string
+}
+
+export interface ConversationSummary {
+  id: string
+  title: string
+  message_count: number
+  created_at: string
+  updated_at: string
+  last_question: string | null
+  last_answer: string | null
+  /** True for questions asked before conversations existed. */
+  is_legacy: boolean
+}
+
+export interface ConversationDetail {
+  id: string
+  title: string
+  message_count: number
+  created_at: string
+  updated_at: string
+  messages: QueryRecord[]
 }
 
 export interface SourceSummary {
@@ -197,18 +270,51 @@ export interface ColorSchemeOption {
   label: string
 }
 
+export interface LlmProviderProfile {
+  id: string
+  label: string
+  provider: string
+  model: string
+  base_url: string
+  priority: number
+  enabled: boolean
+  api_key_set: boolean
+  api_key_masked: string | null
+}
+
+export interface LlmProviderUpdate {
+  id?: string
+  label?: string
+  provider?: string
+  model?: string
+  base_url?: string
+  api_key?: string
+  priority?: number
+  enabled?: boolean
+}
+
 export interface AppSettings {
   llm_provider: string
   openai_model: string
   openai_base_url: string
   api_key_set: boolean
   api_key_masked: string | null
+  llm_providers: LlmProviderProfile[]
+  active_provider_id: string | null
   platform_name: string
   platform_tagline: string
   logo_url: string | null
   color_scheme: string
   color_schemes: ColorSchemeOption[]
   providers: string[]
+  currency: string
+  currencies: CurrencyOption[]
+}
+
+export interface CurrencyOption {
+  code: string
+  label: string
+  symbol: string
 }
 
 export interface AppSettingsUpdate {
@@ -216,9 +322,42 @@ export interface AppSettingsUpdate {
   openai_model?: string
   openai_api_key?: string
   openai_base_url?: string
+  llm_providers?: LlmProviderUpdate[]
+  active_provider_id?: string
   platform_name?: string
   platform_tagline?: string
   color_scheme?: string
+  currency?: string
+}
+
+export interface ConnectionTestPayload {
+  provider_id?: string
+  llm_provider?: string
+  openai_model?: string
+  openai_api_key?: string
+  openai_base_url?: string
+}
+
+export function formatApiError(raw: string, fallback = 'Request failed'): string {
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown }
+    const detail = parsed.detail
+    if (typeof detail === 'string') return detail
+    if (Array.isArray(detail)) {
+      return detail
+        .map((item) => {
+          if (typeof item === 'string') return item
+          if (item && typeof item === 'object' && 'msg' in item) {
+            return String((item as { msg: string }).msg)
+          }
+          return JSON.stringify(item)
+        })
+        .join('; ')
+    }
+  } catch {
+    /* not JSON */
+  }
+  return raw.trim() || fallback
 }
 
 export interface MySQLConnectionConfig {
@@ -270,7 +409,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const detail = await res.text()
-    throw new Error(detail || `Request failed: ${res.status}`)
+    throw new Error(formatApiError(detail, `Request failed: ${res.status}`))
   }
   if (res.status === 204) return undefined as T
   return res.json()
@@ -309,6 +448,13 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ field_mapping, confirm }),
     }),
+  setPrimaryTable: (id: number, table: string) =>
+    requestJson<DataSource>(`/sources/${id}/primary-table`, {
+      method: 'POST',
+      body: JSON.stringify({ table }),
+    }),
+  automapSource: (id: number) =>
+    requestJson<DataSource>(`/sources/${id}/automap`, { method: 'POST' }),
   recomputeSource: (id: number) =>
     requestJson<DataSource>(`/sources/${id}/recompute`, { method: 'POST' }),
   canonicalFields: () => requestJson<{ fields: string[] }>('/sources/canonical-fields'),
@@ -384,13 +530,23 @@ export const api = {
     const params = sourceId ? `?source_id=${sourceId}` : ''
     return requestJson<FindingsResponse>(`/insights/findings${params}`)
   },
+  listConversations: () => requestJson<ConversationSummary[]>('/conversations'),
+  getConversation: (id: string) =>
+    requestJson<ConversationDetail>(`/conversations/${encodeURIComponent(id)}`),
+  renameConversation: (id: string, title: string) =>
+    requestJson<ConversationSummary>(`/conversations/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    }),
+  deleteConversation: (id: string) =>
+    request<void>(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   getSettings: () => requestJson<AppSettings>('/settings'),
   updateSettings: (payload: AppSettingsUpdate) =>
     requestJson<AppSettings>('/settings', {
       method: 'PUT',
       body: JSON.stringify(payload),
     }),
-  testAiConnection: (payload: AppSettingsUpdate) =>
+  testAiConnection: (payload: ConnectionTestPayload) =>
     requestJson<{ ok: boolean; message: string }>('/settings/test-connection', {
       method: 'POST',
       body: JSON.stringify(payload),

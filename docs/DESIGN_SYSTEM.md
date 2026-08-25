@@ -116,6 +116,22 @@ line (never a pie — slices of a whole make no sense across periods); several
 measures compare as bars; a handful of categories is a pie; everything else is
 a bar.
 
+**Field mapping:** columns are mapped to canonical business fields by the AI
+provider (`services/ai_mapping.py`) using profiles and real values, falling back
+to keyword matching. **Each field may be claimed by at most one column** —
+`resolve_conflicts()` enforces this, because metrics read the first match and a
+duplicate silently swaps one measure for another. **Measures stated once per
+group** (a campaign budget, a store target) are summed per group, not per row. A mapping is auto-confirmed only when it produces a
+measure — otherwise the UI asks for review rather than claiming the dataset is
+ready.
+
+**Column profiles:** ingestion records each column's real date span, numeric
+bounds, and category values (`services/profiling.py`) and puts them in the SQL
+planner's prompt. Without this the planner invents date literals — a question
+about "March to May" once produced a 2023 filter against 2026 data. A query that
+matches nothing (including `SUM()` returning NULL) is reported as empty, with
+the range the data does cover.
+
 **Grounding rule:** the sentence is written from the rows that came back. With
 an AI provider key the model is given those exact rows and told to use only
 them; without a key `describe_result()` computes the summary arithmetically.
@@ -131,8 +147,8 @@ router dependency.
 
 | View | Path |
 |------|------|
-| Analysis (landing) | `/ask` — `/` resolves here |
-| Q&A History | `/history` (`?q=<id>` selects a question) |
+| Analysis (landing) | `/ask` — `/` resolves here; `?c=<id>` opens a saved chat. Sign-in always lands here |
+| History | `/history` — the list of saved chats |
 | Dashboard | `/dashboard` |
 | Findings | `/findings` |
 | Data Sources | `/data-sources` |
@@ -244,8 +260,8 @@ carry less separation on a dark canvas).
 | Login | ✅ Done | `docs/mockups/login.png` + Stitch `login_stitch.html` | `frontend/src/pages/LoginPage.tsx` |
 | App shell / sidebar | ✅ Done | `docs/mockups/sidebar-style.png` | `AppShell.tsx` — floating rail, grouped nav, collapse, mobile drawer, theme toggle |
 | Data sources | ✅ Done | Stitch mockup | `DataSourcesPage.tsx` |
-| AI chat / query | ✅ Done | Stitch mockup | `AskAiPage.tsx` — landing page; thread persists, stop/retry, result cards |
-| Q&A History | ✅ Done | `docs/mockups/qa-history.png` + `stitch_qa_history/code.html` | `HistoryPage.tsx` |
+| AI chat / query | ✅ Done | Stitch mockup | `AskAiPage.tsx` — landing page; server-backed conversation, stop/retry, result cards |
+| History (chat list) | ✅ Done | — | `HistoryPage.tsx` — conversation cards with rename/delete/search |
 | Findings / Reports | ✅ Done | `docs/mockups/findings.png` + `stitch_findings/code.html` | `FindingsPage.tsx` (live findings + pinned reports) |
 | Overview dashboard | ✅ Done | Stitch mockup | `OverviewPage.tsx` |
 | Settings | ✅ Done | Stitch mockup | `SettingsPage.tsx` |

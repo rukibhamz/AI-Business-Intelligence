@@ -31,3 +31,13 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Production env files (templates are committed, real values never are)
+.env.production
+.env.docker
+.env.*.local
+
+# Test artifacts
+backend/tests/.uploads/
+.pytest_cache/
+.ruff_cache/

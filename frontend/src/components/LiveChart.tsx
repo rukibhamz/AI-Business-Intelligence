@@ -84,11 +84,29 @@ export function LiveChart({ chart, height = 260 }: { chart: OverviewChart; heigh
               cursor={{ fill: 'var(--cl-accent-quiet)' }}
               formatter={tooltipFormatter}
             />
-            <Bar dataKey={valueKeys[0]} radius={[0, 4, 4, 0]} maxBarSize={22}>
-              {data.map((_, i) => (
-                <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
-              ))}
-            </Bar>
+            {valueKeys.length > 1 && (
+              <Legend
+                iconType="circle"
+                iconSize={8}
+                wrapperStyle={{ fontSize: 12, fontFamily: 'var(--cl-font-body)', paddingTop: 6 }}
+              />
+            )}
+            {/* One series gets a colour per category; several get a colour per
+                series, so revenue and profit stay comparable across rows. */}
+            {valueKeys.map((key, series) => (
+              <Bar
+                key={key}
+                dataKey={key}
+                radius={[0, 4, 4, 0]}
+                maxBarSize={valueKeys.length > 1 ? 14 : 22}
+                fill={CHART_COLORS[series % CHART_COLORS.length]}
+              >
+                {valueKeys.length === 1 &&
+                  data.map((_, i) => (
+                    <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
+                  ))}
+              </Bar>
+            ))}
           </BarChart>
         </ResponsiveContainer>
       </div>

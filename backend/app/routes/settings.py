@@ -2,7 +2,7 @@ import uuid
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from app.schemas import (
 from app.services.app_settings import (
     PROVIDER_PRESETS,
     branding_upload_dir,
+    ensure_providers,
     get_ai_runtime,
     load_app_settings,
     public_settings_view,
@@ -43,7 +44,10 @@ async def update_settings(
     _: User = Depends(get_current_user),
 ) -> dict:
     updates = payload.model_dump(exclude_unset=True)
-    data = await save_app_settings(db, updates)
+    try:
+        data = await save_app_settings(db, updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return public_settings_view(data)
 
 
@@ -53,24 +57,80 @@ async def test_connection(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> ConnectionTestResponse:
-    runtime = await get_ai_runtime(db)
-    api_key = payload.api_key or runtime["api_key"]
-    if payload.api_key and set(payload.api_key) <= {"•", "."}:
-        api_key = runtime["api_key"]
+    try:
+        return await _run_connection_test(payload, db)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Connection test failed: {exc}",
+        ) from exc
 
-    provider = payload.llm_provider or runtime["provider"]
-    model = payload.openai_model or runtime["model"]
-    base_url = payload.openai_base_url or runtime["base_url"]
-    if not payload.openai_base_url and provider in PROVIDER_PRESETS:
+
+async def _run_connection_test(
+    payload: ConnectionTestRequest,
+    db: AsyncSession,
+) -> ConnectionTestResponse:
+    data = await load_app_settings(db)
+    providers = ensure_providers(data)
+
+    api_key = payload.openai_api_key or ""
+    if api_key and set(api_key) <= {"•", "."}:
+        api_key = ""
+
+    provider = payload.llm_provider
+    model = payload.openai_model
+    base_url = payload.openai_base_url
+    label = provider or "provider"
+
+    if payload.provider_id:
+        match = next((p for p in providers if p["id"] == payload.provider_id), None)
+        if not match:
+            raise HTTPException(status_code=404, detail="Provider profile not found")
+        api_key = api_key or str(match.get("api_key") or "")
+        provider = provider or str(match.get("provider") or "openai")
+        model = model or str(match.get("model") or "")
+        base_url = base_url or str(match.get("base_url") or "")
+        label = str(match.get("label") or provider)
+    else:
+        runtime = await get_ai_runtime(db)
+        api_key = api_key or runtime["api_key"]
+        provider = provider or runtime["provider"]
+        model = model or runtime["model"]
+        base_url = base_url or runtime["base_url"]
+        label = runtime.get("label") or provider
+
+    if not base_url and provider in PROVIDER_PRESETS:
         base_url = PROVIDER_PRESETS[provider]["base_url"]
+    if not model and provider in PROVIDER_PRESETS:
+        model = PROVIDER_PRESETS[provider]["default_model"]
 
     if not api_key:
-        raise HTTPException(status_code=400, detail="API key is not configured")
+        raise HTTPException(
+            status_code=400,
+            detail="API key is not configured for this provider. Paste a key and try again.",
+        )
+    if not base_url:
+        raise HTTPException(status_code=400, detail="API base URL is required")
+    if not model:
+        raise HTTPException(status_code=400, detail="Model name is required")
 
+    if provider == "anthropic" and "anthropic.com" in base_url and "compatible" not in base_url:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Anthropic native API is not OpenAI-compatible. "
+                "Set Base URL to an OpenAI-compatible gateway (e.g. OpenRouter) "
+                "or use OpenAI / Groq / Gemini / Mistral instead."
+            ),
+        )
+
+    url = f"{base_url.rstrip('/')}/chat/completions"
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             res = await client.post(
-                f"{base_url.rstrip('/')}/chat/completions",
+                url,
                 headers={
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json",
@@ -83,17 +143,32 @@ async def test_connection(
                 },
             )
             if res.status_code >= 400:
-                detail = res.text[:300]
+                detail = res.text[:400]
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Provider returned {res.status_code}: {detail}",
+                    detail=f"{label} returned HTTP {res.status_code}: {detail}",
                 )
+            body = res.json()
+            reply = ""
+            try:
+                reply = str(body["choices"][0]["message"]["content"]).strip()
+            except (KeyError, IndexError, TypeError, ValueError):
+                reply = ""
     except HTTPException:
         raise
+    except httpx.TimeoutException as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Timed out reaching {base_url}. Check the base URL and network.",
+        ) from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=f"Connection failed: {exc}") from exc
 
-    return ConnectionTestResponse(ok=True, message=f"Connected to {provider} ({model})")
+    suffix = f" - model replied: {reply[:40]}" if reply else ""
+    return ConnectionTestResponse(
+        ok=True,
+        message=f"Connected to {label} ({provider} / {model}){suffix}",
+    )
 
 
 @router.post("/logo", response_model=AppSettingsPublic)

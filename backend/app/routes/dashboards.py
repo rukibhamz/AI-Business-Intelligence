@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Dashboard, Query as QueryModel, User
+from app.models import Dashboard, User
+from app.models import Query as QueryModel
 from app.schemas import (
     DashboardCreate,
     DashboardResponse,

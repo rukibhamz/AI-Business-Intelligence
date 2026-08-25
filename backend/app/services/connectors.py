@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -115,7 +114,7 @@ class FileConnector(BaseConnector):
 
         total = len(data_rows)
         page = data_rows[offset : offset + limit]
-        rows = [dict(zip(columns, row + [""] * (len(columns) - len(row)))) for row in page]
+        rows = [dict(zip(columns, row + [""] * (len(columns) - len(row)), strict=False)) for row in page]
         return rows, columns, total
 
     def _introspect_xlsx(self) -> list[ColumnSchema]:
@@ -227,7 +226,7 @@ class MySQLConnector(BaseConnector):
                 await cur.execute(f"SELECT * FROM `{table}` LIMIT %s OFFSET %s", (limit, offset))
                 rows_raw = await cur.fetchall()
                 columns = [desc[0] for desc in cur.description or []]
-                rows = [dict(zip(columns, row)) for row in rows_raw]
+                rows = [dict(zip(columns, row, strict=False)) for row in rows_raw]
         finally:
             conn.close()
 

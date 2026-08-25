@@ -1,6 +1,6 @@
 """Live overview + findings computed from connected data sources."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
@@ -67,7 +67,7 @@ async def get_overview(
 ) -> dict:
     sources = await _list_sources(db)
     available = summarize_sources(sources)
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = datetime.now(UTC).isoformat()
 
     source = await _resolve_source(db, source_id)
     if source is None:
@@ -128,7 +128,7 @@ async def get_findings(
 ) -> dict:
     sources = await _list_sources(db)
     available = summarize_sources(sources)
-    generated_at = datetime.now(timezone.utc).isoformat()
+    generated_at = datetime.now(UTC).isoformat()
 
     if scope == "source" or source_id is not None:
         source = await _resolve_source(db, source_id)

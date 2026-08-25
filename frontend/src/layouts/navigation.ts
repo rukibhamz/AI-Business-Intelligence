@@ -20,9 +20,9 @@ export const NAV_ITEMS: NavItem[] = [
   },
   {
     id: 'history',
-    label: 'Q&A History',
+    label: 'History',
     icon: 'history',
-    description: 'Review previous questions and results',
+    description: 'Your past chats — reopen and continue any of them',
     group: 'Analyze',
   },
   {
@@ -63,8 +63,8 @@ export const PAGE_META: Record<AppView, { title: string; subtitle: string }> = {
     subtitle: 'Ask a question — answered with SQL run against your own data',
   },
   history: {
-    title: 'Q&A History',
-    subtitle: 'Every question asked and the result it returned',
+    title: 'History',
+    subtitle: 'Your past chats — open one to pick up where you left off',
   },
   overview: {
     title: 'Dashboard',

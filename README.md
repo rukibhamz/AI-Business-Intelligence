@@ -23,7 +23,6 @@ cd backend
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 pip install -r requirements.txt
-# Phase 2 only: pip install -r requirements-phase2.txt
 copy ..\.env.example ..\.env  # edit DATABASE_URL if needed
 uvicorn app.main:app --reload --port 8000
 ```
@@ -41,6 +40,12 @@ npm run dev
 App: http://localhost:5173
 
 **Default login:** `admin@local.dev` / `admin123` (change via `ADMIN_EMAIL` / `ADMIN_PASSWORD` in `.env`)
+
+## Deploying
+
+See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for the production runbook —
+required configuration, local verification with Docker, hosted setup, and the
+post-deploy checklist.
 
 ## Build Plan
 

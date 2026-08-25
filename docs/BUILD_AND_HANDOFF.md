@@ -41,10 +41,10 @@ AI-Business-Intelligence/
 | Field | Value |
 |-------|-------|
 | **Last updated** | 2026-08-25 |
-| **Last agent/session** | Answer-format guardrail + analysis sessions |
-| **Active phase** | Core product screens complete; Phase 6 next |
-| **Phase status** | All screens render live data; no placeholder content remains |
-| **Blockers** | None |
+| **Last agent/session** | Multi-table sources, driver analysis, currency setting |
+| **Active phase** | Phase 6 — mostly complete (see §3 Phase 6 table) |
+| **Phase status** | Phases 1–5 validated against the code; deploy artifacts in place |
+| **Blockers** | None for a soft launch. Open gaps listed in `docs/DEPLOYMENT.md` §6 |
 
 ### 2.2 What Was Completed
 
@@ -82,6 +82,30 @@ AI-Business-Intelligence/
 - [x] **Grounded natural-language answers** — `answer` is written from the rows
       that came back (LLM with the rows in the prompt when a key is set,
       otherwise computed arithmetically); stored and replayed in history
+- [x] **Diagnostic answers** (`services/diagnostics.py`) — "why did revenue fall"
+      used to come back empty: one SELECT has nothing to compare, and the
+      narrative prompt is forbidden from going beyond the rows. Those questions
+      now take a separate path — latest period vs the one before it, the change
+      attributed to the segments that carry it (the dimension that concentrates
+      the movement wins), plus price-vs-volume, margin, churned segments and a
+      partial-period warning. `response_format` is `diagnostic`; the evidence
+      ships in `diagnosis` and is replayed from `queries.diagnosis_json`
+- [x] **Recommendations** — questions that ask what to do ("what should we do
+      about the loss", "how do we prevent this") come back with `recommendations`:
+      each action names the figure that justifies it and a now/next/watch
+      priority. Derived arithmetically from the diagnosis; the model only rewords
+      them and never sees raw rows, so it has nothing to miscalculate. A "why"
+      answer offers follow-up chips rather than unasked-for advice
+- [x] **A "why" question never dead-ends** — when the data cannot support a period
+      comparison (no date column, one period, no mapped measure), the question is
+      not dropped back onto the SQL path that returned nothing. The measured
+      comparison that *does* exist plus an explicit list of what is missing goes
+      to the model, which states what cannot be answered and why
+- [x] **Progress copy** — the thread said "Writing SQL and querying your data…"
+      for every question, including the ones that never write SQL. Now a phased,
+      implementation-neutral label ("Thinking…" → "Working through your data…")
+- [x] **Network errors read as network errors** — a dropped request rendered the
+      raw "Failed to fetch"; it now says the server could not be reached
 - [x] **Chart-type fix:** a date axis is never a pie chart
 - [x] **Heuristic planner learned GROUP BY** — "revenue by region" now aggregates
       by region instead of dumping rows sorted by revenue; "over time" groups by
@@ -91,12 +115,104 @@ AI-Business-Intelligence/
 - [x] Sidebar item renamed **Analysis**; "New session" starts a fresh transcript
 - [x] Lightweight column migration in `database.py` (`create_all` cannot add
       columns to an existing table); replace with Alembic in Phase 6
+- [x] **Phases 1–5 validated against the code** (not just the checkboxes) — see §7
+- [x] **Security fix:** `GET /api/sources` returned `connection_config` verbatim,
+      leaking external database passwords to any authenticated client. Now redacted,
+      with the stored secret preserved on round-trip updates
+- [x] **Security fix:** the SQL sandbox allowed `load_extension()`, `readfile()`,
+      `pg_read_file()`, `load_file()`, `benchmark()`, `sleep()` — a read-only
+      SELECT that still reads files or runs native code. Now blocked, with comments
+      stripped first so they cannot mask a keyword
+- [x] **Production config guardrail** — `APP_ENV=production` refuses to boot on the
+      default `SECRET_KEY`/`ADMIN_PASSWORD`, wildcard or plain-http CORS, or `SQL_ECHO`
+- [x] **Portability fix:** the column migration emitted MySQL backticks and would
+      have crashed on the Postgres target named in §6. Now dialect-aware; `asyncpg` added
+- [x] `/docs`, `/redoc`, `/openapi.json` disabled in production
+- [x] Per-user rate limit on `POST /queries/run` (each call can hit a paid provider)
+- [x] Dropped the dead `passlib` dependency (unused, and its pin conflicts with bcrypt 4.x)
+- [x] **Chat conversations** — new `conversations` table + `/api/conversations`
+      (list, open, rename, delete). History is now a list of chats, not single
+      questions; opening one loads the whole thread at `/ask?c=<id>` and you can
+      keep asking in it. Rows predating conversations still list, each on its own
+- [x] **Transcripts moved to the server** — the chat no longer rebuilds from
+      `sessionStorage`; it loads from `/api/conversations/{id}`, so a reload or a
+      different browser shows the same thread
+- [x] Deleting a chat removes its questions and any dashboard widget pinned from
+      them (shared `services/cleanup.py`, also used by data-source deletion)
+- [x] Sign-in always lands on `/ask`, whatever URL was open before
+- [x] Sidebar "Q&A History" renamed **History**
+- [x] **Bug fix: date-range questions returned nothing.** "how much did we make
+      between march and may?" produced SQL filtering on **2023** against 2026
+      data. The planner prompt only listed column names and types, so the model
+      guessed a year. Three parts:
+      - **Column profiling** (`services/profiling.py`) — date spans, numeric
+        bounds, and category values are computed at ingest and stored in
+        `schema_json`; the prompt now shows them and states the dataset's span
+      - **Prompt rules** — never invent a year; derive it from the shown range
+      - **Empty results** — `SUM()` over zero rows returns one NULL row, which
+        was reported as "One matching record: total revenue None". Now detected
+        as empty and answered with the range the data actually covers
+- [x] The offline fallback planner also learned month ranges and `SUM()` totals,
+      taking the year from the profile so it cannot invent one either
+
+- [x] **AI field mapping** (`services/ai_mapping.py`) — on upload, MySQL connect,
+      or Recompute, the model maps columns to canonical fields using the profiled
+      ranges, category values, and real sample rows, not just column names.
+      Auto-confirms when the mapping yields at least one measure, so the dashboard
+      works with no manual step; otherwise it stays pending for review
+      - The model's answer is validated: unknown columns and non-canonical field
+        names are discarded and the keyword heuristic fills any gap
+      - Falls back silently to the heuristic when no provider is configured or the
+        call fails — ingestion never breaks on it
+      - `POST /sources/{id}/automap` re-runs it; **Auto-map** button in the UI
+      - Sources show **Mapped by AI** vs **Needs mapping**, and the mapping panel
+        no longer interrupts every upload
+
+- [x] **Critical fix: reported margin was double the truth.** Two columns could
+      claim one canonical field — AI mapping put both `cost` and `marketing_spend`
+      on "Cost", and `column_for()` silently returned the first. On a test dataset
+      the dashboard reported 60.51% margin against a true 30.84%.
+      `resolve_conflicts()` now enforces one column per field across the AI,
+      heuristic, and manual paths, demoting losers to Unmapped and surfacing the
+      clash as `mapping_conflicts`
+- [x] **Vocabulary extended for the case study** — added Employee, Campaign,
+      Marketing Spend, Returns, Rating, Delivery Days, Target, Stock, Reorder
+      Level, Channel, Customer Segment, Discount
+- [x] **Word-aware keyword matching** — `sales_rep` used to map to Revenue on a
+      substring match; short tokens now require a whole-word hit so `report_date`
+      is not read as an Employee column
+- [x] **Grain-aware totals** — a campaign budget repeated on every row was summed
+      per row, inflating spend 2.2x and crushing ROI. `total_by_grain()` /
+      `aggregate_by_grain()` count a per-group value once
+- [x] **New KPIs** — Return Rate, Marketing ROI, Avg Rating, Avg Delivery Days,
+      Target Attainment, Stock On Hand
+- [x] **New findings** — revenue-up/margin-down divergence (the case study's
+      headline risk), high-return products, weak campaign ROI, slow or poorly
+      rated delivery partners, locations behind target, stockouts
+- [x] Comparison charts cover all six dimensions the case study names, and only
+      dimensions that actually vary are charted
+
+- [x] **Multi-table sources** — analytics used to read `tables[0]`, so a database
+      connection was analysed on whichever table came first. `pick_primary_table()`
+      now scores tables by the business meaning of their columns, the choice is
+      stored per source, `POST /sources/{id}/primary-table` changes it, and the UI
+      offers a picker. An explicit choice survives a recompute
+- [x] **Driver analysis on findings** — a trend finding now names the segments that
+      caused the move ("Mostly category: Electronics (-5,040)"), choosing whichever
+      dimension concentrates the change and staying silent when it is spread evenly
+- [x] **Currency setting** — admins pick from 12 currencies in Settings, defaulting
+      to **Naira**. Applies to KPIs, charts, and AI answers (the narrative prompt is
+      told the currency so the model does not write dollar signs)
+
+> **Existing sources need a one-off recompute** to gain profiles — open Data
+> Sources and press **Recompute** (new uploads profile automatically).
 
 ### 2.3 What To Do Next
 
-1. Review the app at http://localhost:5173 (upload a CSV with date/revenue/region
-   columns to see the full dashboard populate)
-2. Phase 6: Docker, Alembic, tests, CI when ready
+1. **Deploy:** follow `docs/DEPLOYMENT.md` — it is the runbook, §6 below is the
+   hosting rationale
+2. Remaining Phase 6 work: Alembic (6.2) and object storage for uploads
+3. Close the gaps in `docs/DEPLOYMENT.md` §6 before treating this as production-grade
 
 **Default credentials:** `admin@local.dev` / `admin123`
 
@@ -116,26 +232,47 @@ AI-Business-Intelligence/
 cd backend
 python -m venv .venv
 .venv\Scripts\activate          # Windows
-pip install -r requirements.txt
-pip install -r requirements-phase2.txt   # Phase 2: openpyxl for Excel
+pip install -r requirements.txt          # runtime (openpyxl + both DB drivers included)
+pip install -r requirements-dev.txt      # adds pytest + ruff
 uvicorn app.main:app --reload --port 8000
+
+# Checks (same as CI)
+pytest
+ruff check app tests
 
 # Frontend
 cd frontend
 npm install
 npm run dev                      # http://localhost:5173
 
+# Checks (same as CI)
+npx tsc -b --force
+npm run lint
+npm run build
+
 # Database (XAMPP MySQL)
 mysql -u root -e "CREATE DATABASE IF NOT EXISTS ai_bi CHARACTER SET utf8mb4;"
+
+# Full production-shaped stack (Postgres + API + nginx)
+cp .env.production.example .env.docker    # then edit the secrets
+docker compose --env-file .env.docker up --build
 ```
+
+> If backend edits appear not to take effect, kill every `uvicorn` process and
+> delete `backend/app/**/__pycache__`. Duplicate processes and stale bytecode
+> both bit during development; `--reload` was unreliable on this machine.
 
 ### 2.6 Environment Variables
 
 See `.env.example`. Minimum for Phase 1:
 
+For production see `.env.production.example` and `docs/DEPLOYMENT.md` §1 — the
+API **refuses to start** with `APP_ENV=production` if the security-critical
+values are still at their defaults.
+
 | Variable | Purpose |
 |----------|---------|
-| `DATABASE_URL` | MySQL connection string |
+| `DATABASE_URL` | MySQL (`+aiomysql`) or Postgres (`+asyncpg`) connection string |
 | `SECRET_KEY` | JWT signing (Phase 3) |
 | `OPENAI_API_KEY` | AI queries (Phase 4) |
 | `CORS_ORIGINS` | Frontend URL(s) |
@@ -231,20 +368,23 @@ See `.env.example`. Minimum for Phase 1:
 
 ---
 
-### Phase 6 — Production Hardening ⬜ NOT STARTED
+### Phase 6 — Production Hardening 🟡 MOSTLY COMPLETE
 
 **Objective:** Deployable, observable, tested system.
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 6.1 | Docker Compose (API + MySQL + frontend) | ⬜ | |
-| 6.2 | Alembic migrations | ⬜ | Replace create_all |
-| 6.3 | Unit + integration tests | ⬜ | pytest + vitest |
-| 6.4 | Rate limiting & query cost caps | ⬜ | Protect AI endpoints |
-| 6.5 | CI pipeline (lint, test, build) | ⬜ | GitHub Actions |
-| 6.6 | Deployment docs | ⬜ | |
+| 6.1 | Docker Compose (API + Postgres + frontend) | 🟡 Written, unbuilt | `docker-compose.yml`, both Dockerfiles, `frontend/nginx.conf`. **Docker was unavailable on this machine — images have never been built.** CI builds them on first push |
+| 6.2 | Alembic migrations | ⬜ Not done | `create_all` + additive column patch in `database.py`. Handles new tables/columns; not changes or drops |
+| 6.3 | Unit + integration tests | 🟡 Backend only | 72 pytest tests (sandbox, planner, config guardrails, auth coverage, redaction, rate limiter). No frontend tests |
+| 6.4 | Rate limiting & query cost caps | ✅ Done | Per-user limiter on `/queries/run`; `MAX_QUERY_ROWS` caps result size |
+| 6.5 | CI pipeline (lint, test, build) | ✅ Written | `.github/workflows/ci.yml` — ruff + pytest, tsc + oxlint + vite build, Docker builds. **Never executed — no push yet** |
+| 6.6 | Deployment docs | ✅ Done | `docs/DEPLOYMENT.md` — config, local verification, hosted setup, post-deploy checklist, known gaps |
+| 6.7 | Production config guardrail | ✅ Done | Startup aborts on unsafe production settings |
+| 6.8 | Secret redaction in API responses | ✅ Done | Source credentials never leave the server |
 
-**Exit criteria:** `docker compose up` brings full stack; CI green on PR.
+**Exit criteria:** `docker compose up` brings the full stack; CI green on PR.
+**Status:** both are written but neither has been executed here — see the notes above.
 
 ---
 
@@ -252,11 +392,12 @@ See `.env.example`. Minimum for Phase 1:
 
 | Date | Decision | Rationale |
 |------|----------|-----------|
+| 2026-08-25 | Free deploy: Vercel + Supabase + Render | Frontend on Vercel; Postgres+Storage on Supabase; FastAPI on Render (not Vercel) |
 | 2026-08-25 | Floating sidebar + Plus Jakarta | Match sidebar mockup; cooler geometric UI font |
 | 2026-08-24 | Cognitive Logic design system | Refined Minimalism; Cobalt Indigo; Hanken + Plus Jakarta |
 | 2026-08-24 | Single-business scope (not multi-tenant) | One org per deployment; shared data workspace |
 | 2026-08-24 | FastAPI + React monorepo | AI/ML ecosystem, async API, modern frontend DX |
-| 2026-08-24 | MySQL over PostgreSQL | User runs XAMPP locally |
+| 2026-08-24 | MySQL over PostgreSQL | User runs XAMPP locally; prod may move to Supabase Postgres |
 | 2026-08-24 | OpenAI-compatible API | Flexible provider swap (OpenAI, Azure, local) |
 | 2026-08-24 | JWT auth deferred to Phase 3 | Unblock data/AI work with open API first |
 
@@ -266,6 +407,8 @@ See `.env.example`. Minimum for Phase 1:
 
 | Date | Agent/Human | Work Done |
 |------|-------------|-----------|
+| 2026-08-25 | Agent | Multi AI provider profiles (priority + active switch); fix connection test feedback |
+| 2026-08-25 | Agent | Documented free-tier deploy plan (Vercel / Supabase / Render) in handoff §6 |
 | 2026-08-25 | Agent | Ask AI: ChatGPT/Claude-style composer; workspace-wide queries (no source picker) |
 | 2026-08-25 | Agent | Q&A History screen from Stitch; AI Insights → history, New Analysis → chat |
 | 2026-08-25 | Agent | Findings/Reports UI from Stitch; severity cards + color cleanup |
@@ -283,4 +426,102 @@ See `.env.example`. Minimum for Phase 1:
 
 ---
 
-*End of document. Next agent: start at §2.3.*
+## 6. Deployment (free tier)
+
+Phases 1–5 are complete. You can soft-launch before finishing all of Phase 6, but you need a hosted API, database, and durable file storage. **Do not put FastAPI on Vercel** — Vercel is for the frontend only.
+
+### 6.1 Two kinds of storage
+
+| Need | Today (local) | Free production options |
+|------|---------------|-------------------------|
+| App DB (users, sources, queries, dashboards) | XAMPP MySQL | **Supabase** or **Neon** Postgres (migrate from MySQL); managed MySQL is rare on free tiers |
+| File uploads (CSV/Excel under `UPLOAD_DIR`) | Local disk | **Supabase Storage** or **Cloudflare R2**; platform volumes if the host offers them |
+
+Ephemeral disks on Render/Railway/Fly lose uploads on redeploy unless you use object storage or a persistent volume.
+
+### 6.2 Recommended free stack
+
+| Piece | Free option | Notes |
+|-------|-------------|-------|
+| Frontend | **Vercel** Hobby | Build from `frontend/`; set `VITE_API_URL` to the public API (e.g. `https://your-api.onrender.com/api`) |
+| Backend | **Render** free web service (or Railway trial / Fly free allowance) | FastAPI + uvicorn; Render **sleeps when idle** (cold starts) |
+| Database + files | **Supabase** free (Postgres + Storage) | One account covers both; migrate `DATABASE_URL` to Postgres |
+| Alt DB only | **Neon** free Postgres | Pair with R2 or Supabase Storage for files |
+| Alt files only | **Cloudflare R2** | Generous free storage; no egress to Workers |
+
+**Simplest all-in-one free path:** Supabase (Postgres + Storage) + Render (API) + Vercel (UI).
+
+### 6.3 Minimum env / config for a live deploy
+
+| Variable | Production value |
+|----------|------------------|
+| `DATABASE_URL` | Supabase/Neon Postgres connection string (or managed MySQL if kept) |
+| `SECRET_KEY` | Strong random secret (not the local default) |
+| `OPENAI_API_KEY` | Provider key (or configure via Settings after deploy) |
+| `CORS_ORIGINS` | Include the Vercel origin, e.g. `https://your-app.vercel.app` |
+| `UPLOAD_DIR` / object storage | Prefer Supabase Storage or R2 over bare disk |
+| `VITE_API_URL` (frontend) | Public backend `/api` base URL |
+
+### 6.4 What Supabase does *not* replace
+
+- FastAPI AI/query engine, SQL sandbox, analytics
+- Existing JWT auth (optional later: Supabase Auth)
+
+Keep FastAPI as the API; use Supabase for **DB + file blobs**.
+
+### 6.5 Tradeoffs
+
+- Free tiers: size limits, sleep/cold starts, Postgres instead of MySQL
+- Fine for demo/portfolio; always-on production usually needs a small paid plan later
+- Soft-launch checklist: login → upload → Ask AI → Overview/Findings against prod data
+
+---
+
+*End of document. Next agent: start at §2.3; deploy notes in §6.*
+
+---
+
+## 7. Phase Validation (2026-08-25)
+
+Each phase was re-checked against the code rather than trusting the checkbox.
+Verification commands are in §2.5.
+
+| Phase | Claim | Verdict | Evidence |
+|-------|-------|---------|----------|
+| 1 Foundation | Health, models, routes, UI shell | ✅ Confirmed | `/api/health` → 200; `create_all` + additive column patch; `vite build` passes |
+| 2 Data Layer | CSV/Excel + MySQL connectors, schema, preview | ✅ Confirmed | Live upload → schema + row count + preview; MySQL source connects |
+| 3 Auth | JWT, protected routes, bootstrap admin | ✅ Confirmed **after a fix** | 36 routes audited by AST; all guarded except login, bootstrap register, and the logo (fetched by `<img>`). Registration self-closes after the first user. Test: `test_every_route_requires_authentication` |
+| 4 AI Query | NL→SQL, sandbox, history | 🟡 Confirmed **with fixes** | Sandbox allowed file-reading and code-loading functions — fixed and covered by 30 sandbox tests. Heuristic planner (no-API-key path) is keyword-based and only handles simple shapes |
+| 5 Visualization | Charts, dashboards, export, findings | ✅ Confirmed | Live KPIs/charts/findings from real rows; pin persists; CSV export works |
+| 6 Hardening | — | 🟡 Mostly done | See the Phase 6 table |
+
+### 7.1 Defects found during validation
+
+All fixed and regression-tested:
+
+1. **External DB passwords returned to the client.** `GET /api/sources` serialized
+   `connection_config` verbatim, including `password`. Now redacted; the stored
+   secret is preserved if a client sends the mask back.
+2. **SQL sandbox allowed dangerous functions.** `SELECT load_extension('evil.so')`
+   passed — read-only, but it loads native code in SQLite (used for every CSV/Excel
+   query). Also `readfile`, `pg_read_file`, `load_file`, `benchmark`, `sleep`.
+   Blocked, and comments are stripped before validation so they cannot mask a keyword.
+3. **Postgres-incompatible migration.** The column patch emitted MySQL backticks
+   and would have crashed on the Postgres target named in §6. Now dialect-aware.
+4. **Missing Postgres driver.** `asyncpg` was absent while §6 recommends Supabase.
+5. **Insecure defaults were deployable.** `SECRET_KEY=dev-secret-change-in-production`
+   and `ADMIN_PASSWORD=admin123` would have shipped silently. Startup now aborts.
+6. **Dead dependency.** `passlib` was pinned but unused, and `passlib==1.7.4` is
+   incompatible with `bcrypt>=4.1`. Removed.
+
+### 7.2 Not verified here
+
+Stated plainly so the next person does not assume otherwise:
+
+- **Docker images have never been built** — Docker is not installed on this machine.
+  The Dockerfiles and compose file are written and syntactically valid; the CI
+  workflow builds them on first push.
+- **CI has never run** — no push has happened yet.
+- **No Postgres run** — the dialect-aware DDL was exercised against SQLite (which
+  shares the standard-quoting path), not against a real Postgres server.
+- **No frontend tests exist** — the UI is covered only by typecheck, lint, and build.

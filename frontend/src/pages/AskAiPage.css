@@ -23,7 +23,62 @@
   background: var(--cl-surface-container-lowest);
 }
 
+.ask-toolbar-copy {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ask-toolbar-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(28rem, 52vw);
+  margin: 0;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--cl-radius);
+  background: transparent;
+  color: var(--cl-on-surface);
+  font-family: var(--cl-font-body);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  transition: background var(--cl-duration-fast) var(--cl-ease);
+}
+
+.ask-toolbar-title-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ask-toolbar-title .material-symbols-outlined {
+  flex-shrink: 0;
+  font-size: 15px;
+  color: var(--cl-on-surface-muted);
+  opacity: 0;
+  transition: opacity var(--cl-duration-fast) var(--cl-ease);
+}
+
+.ask-toolbar-title:hover,
+.ask-toolbar-title:focus-visible {
+  background: var(--cl-surface-container-low);
+  outline: none;
+}
+
+.ask-toolbar-title:hover .material-symbols-outlined,
+.ask-toolbar-title:focus-visible .material-symbols-outlined {
+  opacity: 1;
+}
+
 .ask-toolbar-label {
+  flex-shrink: 0;
   font-size: 12.5px;
   color: var(--cl-on-surface-muted);
 }
@@ -32,6 +87,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
   padding: 6px 12px;
   border: 1px solid var(--cl-border);
   border-radius: var(--cl-radius);
@@ -702,5 +758,220 @@
 
   .ask-msg--ai {
     gap: 9px;
+  }
+}
+
+/* ============================================== diagnosis + actions ===== */
+/* A "why" answer shows its evidence: the size of the move, the segments that
+   carry it, and the mechanics behind it. */
+
+.ask-diagnosis {
+  display: grid;
+  gap: var(--cl-space-md);
+}
+
+.ask-diag-move {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px var(--cl-space-sm);
+  padding: var(--cl-space-md);
+  border-radius: var(--cl-radius-md);
+  background: var(--cl-surface-container-low);
+}
+
+.ask-diag-delta {
+  font-family: var(--cl-font-metric);
+  font-size: 26px;
+  line-height: 32px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.ask-diag-move.is-down .ask-diag-delta {
+  color: var(--cl-critical-fg);
+}
+
+.ask-diag-move.is-up .ask-diag-delta {
+  color: var(--cl-success-fg);
+}
+
+.ask-diag-detail {
+  color: var(--cl-on-surface-variant);
+  font-size: 13px;
+}
+
+.ask-driver-list {
+  display: grid;
+  gap: var(--cl-space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ask-driver-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--cl-space-sm);
+}
+
+.ask-driver-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cl-on-surface);
+}
+
+.ask-driver-change {
+  font-family: var(--cl-font-metric);
+  font-size: 14px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ask-driver-list li.is-down .ask-driver-change {
+  color: var(--cl-critical-fg);
+}
+
+.ask-driver-list li.is-up .ask-driver-change {
+  color: var(--cl-success-fg);
+}
+
+/* The bar is the share of the movement, not the value — a small segment can
+   still own most of the change. */
+.ask-driver-track {
+  height: 6px;
+  margin: 6px 0 4px;
+  border-radius: 999px;
+  background: var(--cl-surface-container-high);
+  overflow: hidden;
+}
+
+.ask-driver-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--cl-on-surface-muted);
+}
+
+.ask-driver-list li.is-down .ask-driver-track span {
+  background: var(--cl-critical);
+}
+
+.ask-driver-list li.is-up .ask-driver-track span {
+  background: var(--cl-success);
+}
+
+.ask-driver-share {
+  font-size: 12px;
+  color: var(--cl-on-surface-muted);
+}
+
+.ask-factor-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0 0 0 18px;
+  color: var(--cl-on-surface-variant);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.ask-diag-note {
+  margin: 0;
+  color: var(--cl-on-surface-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ask-action-list {
+  display: grid;
+  gap: var(--cl-space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: ask-action;
+}
+
+.ask-action {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--cl-space-md);
+  align-items: start;
+  padding: var(--cl-space-md);
+  border: 1px solid var(--cl-border);
+  border-radius: var(--cl-radius-md);
+  background: var(--cl-surface-container-lowest);
+}
+
+.ask-action-priority {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  background: var(--cl-surface-container-high);
+  color: var(--cl-on-surface-variant);
+}
+
+.ask-action.is-now .ask-action-priority {
+  background: var(--cl-critical-bg);
+  color: var(--cl-critical-fg);
+}
+
+.ask-action.is-next .ask-action-priority {
+  background: var(--cl-warning-bg);
+  color: var(--cl-warning-fg);
+}
+
+.ask-action.is-watch .ask-action-priority {
+  background: var(--cl-accent-quiet);
+  color: var(--cl-accent-strong);
+}
+
+.ask-action-body h5 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cl-on-surface);
+}
+
+.ask-action-body p {
+  margin: 0;
+  color: var(--cl-on-surface-variant);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* The figure that justifies the action, so a reader can judge it. */
+.ask-action-basis {
+  margin-top: 6px !important;
+  padding-left: 9px;
+  border-left: 2px solid var(--cl-border);
+  color: var(--cl-on-surface-muted) !important;
+  font-size: 12px !important;
+}
+
+.ask-followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cl-space-sm);
+}
+
+.ask-suggest--inline {
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .ask-action {
+    grid-template-columns: 1fr;
+    gap: var(--cl-space-sm);
+  }
+
+  .ask-action-priority {
+    justify-self: start;
   }
 }

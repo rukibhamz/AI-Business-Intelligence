@@ -27,11 +27,12 @@ async def get_current_user(
         payload = decode_access_token(credentials.credentials)
         user_id = int(payload.get("sub", "0"))
     except (JWTError, ValueError, TypeError):
+        # `from None` keeps the token-decoding internals out of the response.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from None
 
     user = await db.get(User, user_id)
     if not user:

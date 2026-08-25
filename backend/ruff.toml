@@ -1,0 +1,13 @@
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4"]
+ignore = [
+    "B008",  # FastAPI's Depends()/Query() defaults are the documented idiom
+    "E501",  # long strings in prompts and messages
+    "UP038", # isinstance(x, (int, float)) is idiomatic and faster than the union form
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E402"]  # conftest sets env vars before importing the app

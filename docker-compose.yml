@@ -1,0 +1,68 @@
+# Full stack for local verification of a production-shaped deployment.
+#
+#   cp .env.production.example .env.docker   # then edit the secrets
+#   docker compose --env-file .env.docker up --build
+#
+# The UI is served by nginx on :8080 and proxies /api to the API container, so
+# the browser sees a single origin.
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ai_bi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_bi}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ai_bi} -d ${POSTGRES_DB:-ai_bi}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ai_bi}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-ai_bi}
+      SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?set ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD}
+      ADMIN_FULL_NAME: ${ADMIN_FULL_NAME:-Administrator}
+      # nginx fronts both, so the browser origin is the web container's.
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      QUERY_RATE_LIMIT_PER_MINUTE: ${QUERY_RATE_LIMIT_PER_MINUTE:-20}
+      MAX_QUERY_ROWS: ${MAX_QUERY_ROWS:-200}
+      SQL_ECHO: "false"
+      EXPOSE_API_DOCS: "false"
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    expose:
+      - "8000"
+
+  web:
+    build:
+      context: ./frontend
+      args:
+        # Same-origin: nginx proxies /api to the API container.
+        VITE_API_URL: /api
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "${WEB_PORT:-8080}:80"
+
+volumes:
+  db_data:
+  uploads:

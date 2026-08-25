@@ -4,6 +4,8 @@ import {
   type AppSettings,
   type AppSettingsUpdate,
   type ColorSchemeOption,
+  type LlmProviderProfile,
+  type LlmProviderUpdate,
 } from '../api/client'
 import './SettingsPage.css'
 
@@ -11,13 +13,74 @@ type Props = {
   onSaved?: (settings: AppSettings) => void
 }
 
+type DraftProvider = LlmProviderUpdate & {
+  id: string
+  label: string
+  provider: string
+  model: string
+  base_url: string
+  priority: number
+  enabled: boolean
+  api_key: string
+  api_key_set?: boolean
+  api_key_masked?: string | null
+}
+
 const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
-  anthropic: 'Anthropic',
+  anthropic: 'Anthropic (via compatible gateway)',
   mistral: 'Mistral',
   qwen: 'Qwen',
   gemini: 'Gemini',
   groq: 'Groq',
+  custom: 'Custom (OpenAI-compatible)',
+}
+
+const PRESET_DEFAULTS: Record<string, { base_url: string; model: string }> = {
+  openai: { base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  anthropic: { base_url: 'https://openrouter.ai/api/v1', model: 'anthropic/claude-3.5-sonnet' },
+  mistral: { base_url: 'https://api.mistral.ai/v1', model: 'mistral-large-latest' },
+  qwen: {
+    base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-plus',
+  },
+  gemini: {
+    base_url: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    model: 'gemini-2.0-flash',
+  },
+  groq: { base_url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' },
+  custom: { base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+}
+
+function toDraft(p: LlmProviderProfile): DraftProvider {
+  return {
+    id: p.id,
+    label: p.label,
+    provider: p.provider,
+    model: p.model,
+    base_url: p.base_url,
+    priority: p.priority,
+    enabled: p.enabled,
+    api_key: '',
+    api_key_set: p.api_key_set,
+    api_key_masked: p.api_key_masked,
+  }
+}
+
+function newDraft(priority: number): DraftProvider {
+  const preset = PRESET_DEFAULTS.openai
+  return {
+    id: `new-${Date.now()}`,
+    label: `Provider ${priority}`,
+    provider: 'openai',
+    model: preset.model,
+    base_url: preset.base_url,
+    priority,
+    enabled: true,
+    api_key: '',
+    api_key_set: false,
+    api_key_masked: null,
+  }
 }
 
 export function SettingsPage({ onSaved }: Props) {
@@ -26,25 +89,42 @@ export function SettingsPage({ onSaved }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [okMsg, setOkMsg] = useState<string | null>(null)
-  const [showKey, setShowKey] = useState(false)
+  const [testMsg, setTestMsg] = useState<string | null>(null)
+  const [testOk, setTestOk] = useState<boolean | null>(null)
+  const [testingId, setTestingId] = useState<string | null>(null)
+  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({})
 
   const [platformName, setPlatformName] = useState('')
   const [tagline, setTagline] = useState('')
   const [scheme, setScheme] = useState('cobalt')
-  const [provider, setProvider] = useState('openai')
-  const [model, setModel] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [baseUrl, setBaseUrl] = useState('')
+  const [currency, setCurrencyChoice] = useState('NGN')
+  const [providers, setProviders] = useState<DraftProvider[]>([])
+  const [activeId, setActiveId] = useState<string | null>(null)
 
   function hydrate(s: AppSettings) {
     setSettings(s)
     setPlatformName(s.platform_name)
     setTagline(s.platform_tagline)
     setScheme(s.color_scheme)
-    setProvider(s.llm_provider)
-    setModel(s.openai_model)
-    setBaseUrl(s.openai_base_url)
-    setApiKey('')
+    setCurrencyChoice(s.currency || 'NGN')
+    const list = (s.llm_providers?.length ? s.llm_providers : []).map(toDraft)
+    if (list.length === 0) {
+      list.push(
+        toDraft({
+          id: 'legacy-default',
+          label: 'Primary',
+          provider: s.llm_provider || 'openai',
+          model: s.openai_model,
+          base_url: s.openai_base_url,
+          priority: 1,
+          enabled: true,
+          api_key_set: s.api_key_set,
+          api_key_masked: s.api_key_masked,
+        }),
+      )
+    }
+    setProviders(list)
+    setActiveId(s.active_provider_id || list[0]?.id || null)
   }
 
   useEffect(() => {
@@ -56,19 +136,33 @@ export function SettingsPage({ onSaved }: Props) {
       .finally(() => setLoading(false))
   }, [])
 
+  function updateProvider(id: string, patch: Partial<DraftProvider>) {
+    setProviders((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)))
+  }
+
   function buildPayload(): AppSettingsUpdate {
-    const payload: AppSettingsUpdate = {
+    return {
       platform_name: platformName.trim(),
       platform_tagline: tagline.trim(),
       color_scheme: scheme,
-      llm_provider: provider,
-      openai_model: model.trim(),
-      openai_base_url: baseUrl.trim(),
+      currency,
+      active_provider_id: activeId || undefined,
+      llm_providers: providers.map((p) => {
+        const row: LlmProviderUpdate = {
+          id: p.id.startsWith('new-') ? undefined : p.id,
+          label: p.label.trim() || p.provider,
+          provider: p.provider,
+          model: p.model.trim(),
+          base_url: p.base_url.trim(),
+          priority: Number(p.priority) || 1,
+          enabled: p.enabled,
+        }
+        if (p.api_key.trim() && !p.api_key.includes('•')) {
+          row.api_key = p.api_key.trim()
+        }
+        return row
+      }),
     }
-    if (apiKey.trim() && !apiKey.includes('•')) {
-      payload.openai_api_key = apiKey.trim()
-    }
-    return payload
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -76,6 +170,7 @@ export function SettingsPage({ onSaved }: Props) {
     setBusy(true)
     setError(null)
     setOkMsg(null)
+    setTestMsg(null)
     try {
       const saved = await api.updateSettings(buildPayload())
       hydrate(saved)
@@ -93,19 +188,46 @@ export function SettingsPage({ onSaved }: Props) {
     hydrate(settings)
     setOkMsg(null)
     setError(null)
+    setTestMsg(null)
   }
 
-  async function handleTest() {
+  async function handleTest(p: DraftProvider) {
+    setTestingId(p.id)
     setBusy(true)
     setError(null)
     setOkMsg(null)
+    setTestMsg(null)
+    setTestOk(null)
     try {
-      const result = await api.testAiConnection(buildPayload())
+      const payload: {
+        provider_id?: string
+        llm_provider: string
+        openai_model: string
+        openai_base_url: string
+        openai_api_key?: string
+      } = {
+        llm_provider: p.provider,
+        openai_model: p.model.trim(),
+        openai_base_url: p.base_url.trim(),
+      }
+      if (!p.id.startsWith('new-')) {
+        payload.provider_id = p.id
+      }
+      if (p.api_key.trim() && !p.api_key.includes('•')) {
+        payload.openai_api_key = p.api_key.trim()
+      }
+      const result = await api.testAiConnection(payload)
+      setTestOk(true)
+      setTestMsg(result.message)
       setOkMsg(result.message)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Connection test failed')
+      const message = err instanceof Error ? err.message : 'Connection test failed'
+      setTestOk(false)
+      setTestMsg(message)
+      setError(message)
     } finally {
       setBusy(false)
+      setTestingId(null)
     }
   }
 
@@ -145,13 +267,15 @@ export function SettingsPage({ onSaved }: Props) {
   }
 
   const schemes: ColorSchemeOption[] = settings?.color_schemes ?? []
-  const providers = settings?.providers ?? Object.keys(PROVIDER_LABELS)
+  const providerOptions = settings?.providers?.length
+    ? settings.providers
+    : Object.keys(PROVIDER_LABELS)
 
   return (
     <div className="settings-page">
       <form className="settings-stack" onSubmit={handleSave}>
         {error && <p className="settings-error">{error}</p>}
-        {okMsg && <p className="settings-ok">{okMsg}</p>}
+        {okMsg && !error && <p className="settings-ok">{okMsg}</p>}
 
         <section className="settings-card">
           <div className="settings-card-head">
@@ -185,7 +309,9 @@ export function SettingsPage({ onSaved }: Props) {
                 {settings?.logo_url ? (
                   <img src={settings.logo_url} alt="Platform logo" />
                 ) : (
-                  <span className="material-symbols-outlined" aria-hidden="true">image</span>
+                  <span className="material-symbols-outlined" aria-hidden="true">
+                    image
+                  </span>
                 )}
               </div>
               <div className="settings-logo-actions">
@@ -199,13 +325,37 @@ export function SettingsPage({ onSaved }: Props) {
                   />
                 </label>
                 {settings?.logo_url && (
-                  <button type="button" className="settings-text-btn" onClick={() => void handleRemoveLogo()} disabled={busy}>
+                  <button
+                    type="button"
+                    className="settings-text-btn"
+                    onClick={() => void handleRemoveLogo()}
+                    disabled={busy}
+                  >
                     Remove
                   </button>
                 )}
                 <p className="settings-hint">PNG, JPG, WebP, or SVG · max 2MB</p>
               </div>
             </div>
+          </div>
+
+          <div className="settings-field">
+            <span className="settings-label">Currency</span>
+            <div className="settings-select-wrap">
+              <select value={currency} onChange={(e) => setCurrencyChoice(e.target.value)}>
+                {(settings?.currencies ?? []).map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.symbol}  {c.code} — {c.label}
+                  </option>
+                ))}
+              </select>
+              <span className="material-symbols-outlined" aria-hidden="true">
+                expand_more
+              </span>
+            </div>
+            <span className="settings-hint">
+              Applies to every money figure — KPIs, charts, and AI answers.
+            </span>
           </div>
 
           <div className="settings-field">
@@ -234,85 +384,210 @@ export function SettingsPage({ onSaved }: Props) {
 
         <section className="settings-card">
           <div className="settings-card-head">
-            <h2>AI Provider Configuration</h2>
-            <p>Configure the language model for {platformName || 'BI Assistant'} insights.</p>
+            <h2>AI provider configurations</h2>
+            <p>
+              Save multiple OpenAI-compatible providers, set priority (1 = highest), and switch
+              which one is active. Ask AI uses the active provider; if it has no key, the next
+              enabled profile by priority is used.
+            </p>
           </div>
 
-          <label className="settings-field">
-            <span className="settings-label">LLM Provider</span>
-            <div className="settings-select-wrap">
-              <select value={provider} onChange={(e) => setProvider(e.target.value)}>
-                {providers.map((p) => (
-                  <option key={p} value={p}>
-                    {PROVIDER_LABELS[p] ?? p}
-                  </option>
-                ))}
-              </select>
-              <span className="material-symbols-outlined" aria-hidden="true">expand_more</span>
-            </div>
-          </label>
-
-          <label className="settings-field">
-            <span className="settings-label">Model name</span>
-            <input
-              className="settings-mono"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="gpt-4o"
-            />
-            <span className="settings-hint">Specific model identifier (e.g. claude-3-5-sonnet).</span>
-          </label>
-
-          <label className="settings-field">
-            <span className="settings-label">API base URL</span>
-            <input
-              className="settings-mono"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="https://api.openai.com/v1"
-            />
-            <span className="settings-hint">OpenAI-compatible chat completions endpoint.</span>
-          </label>
-
-          <div className="settings-field">
-            <span className="settings-label">API Key</span>
-            <div className="settings-key-row">
-              <div className="settings-key-input">
-                <input
-                  className="settings-mono"
-                  type={showKey ? 'text' : 'password'}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={settings?.api_key_masked || 'sk-…'}
-                  autoComplete="off"
-                />
-                <button
-                  type="button"
-                  className="settings-eye"
-                  onClick={() => setShowKey((v) => !v)}
-                  aria-label={showKey ? 'Hide API key' : 'Show API key'}
+          <div className="settings-provider-list">
+            {providers.map((p) => {
+              const isActive = activeId === p.id
+              return (
+                <article
+                  key={p.id}
+                  className={`settings-provider-card${isActive ? ' is-active' : ''}${
+                    !p.enabled ? ' is-disabled' : ''
+                  }`}
                 >
-                  <span className="material-symbols-outlined" aria-hidden="true">
-                    {showKey ? 'visibility_off' : 'visibility'}
-                  </span>
-                </button>
-              </div>
-              <button type="button" className="settings-test-btn" onClick={() => void handleTest()} disabled={busy}>
-                <span className="material-symbols-outlined" aria-hidden="true">cable</span>
-                Test Connection
-              </button>
-            </div>
-            {settings?.api_key_set && !apiKey && (
-              <span className="settings-hint">Key on file — leave blank to keep current.</span>
-            )}
+                  <div className="settings-provider-top">
+                    <label className="settings-active-radio">
+                      <input
+                        type="radio"
+                        name="active-provider"
+                        checked={isActive}
+                        onChange={() => setActiveId(p.id)}
+                      />
+                      <span>{isActive ? 'Active' : 'Set active'}</span>
+                    </label>
+                    <label className="settings-enable">
+                      <input
+                        type="checkbox"
+                        checked={p.enabled}
+                        onChange={(e) => updateProvider(p.id, { enabled: e.target.checked })}
+                      />
+                      Enabled
+                    </label>
+                    <button
+                      type="button"
+                      className="settings-text-btn"
+                      disabled={providers.length <= 1 || busy}
+                      onClick={() => {
+                        setProviders((prev) => prev.filter((x) => x.id !== p.id))
+                        if (activeId === p.id) {
+                          const next = providers.find((x) => x.id !== p.id)
+                          setActiveId(next?.id ?? null)
+                        }
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+
+                  <div className="settings-provider-grid">
+                    <label className="settings-field">
+                      <span className="settings-label">Label</span>
+                      <input
+                        value={p.label}
+                        onChange={(e) => updateProvider(p.id, { label: e.target.value })}
+                        placeholder="Production OpenAI"
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span className="settings-label">Priority</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={p.priority}
+                        onChange={(e) =>
+                          updateProvider(p.id, { priority: Number(e.target.value) || 1 })
+                        }
+                      />
+                    </label>
+                    <label className="settings-field">
+                      <span className="settings-label">Provider</span>
+                      <div className="settings-select-wrap">
+                        <select
+                          value={p.provider}
+                          onChange={(e) => {
+                            const next = e.target.value
+                            const preset = PRESET_DEFAULTS[next] || PRESET_DEFAULTS.custom
+                            updateProvider(p.id, {
+                              provider: next,
+                              base_url: preset.base_url,
+                              model: preset.model,
+                            })
+                          }}
+                        >
+                          {providerOptions.map((id) => (
+                            <option key={id} value={id}>
+                              {PROVIDER_LABELS[id] ?? id}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="material-symbols-outlined" aria-hidden="true">
+                          expand_more
+                        </span>
+                      </div>
+                    </label>
+                    <label className="settings-field">
+                      <span className="settings-label">Model</span>
+                      <input
+                        className="settings-mono"
+                        value={p.model}
+                        onChange={(e) => updateProvider(p.id, { model: e.target.value })}
+                        placeholder="gpt-4o-mini"
+                      />
+                    </label>
+                    <label className="settings-field settings-field--full">
+                      <span className="settings-label">API base URL</span>
+                      <input
+                        className="settings-mono"
+                        value={p.base_url}
+                        onChange={(e) => updateProvider(p.id, { base_url: e.target.value })}
+                        placeholder="https://api.openai.com/v1"
+                      />
+                      <span className="settings-hint">
+                        Must expose OpenAI-compatible <code>/chat/completions</code>.
+                      </span>
+                    </label>
+                    <div className="settings-field settings-field--full">
+                      <span className="settings-label">API key</span>
+                      <div className="settings-key-row">
+                        <div className="settings-key-input">
+                          <input
+                            className="settings-mono"
+                            type={showKeys[p.id] ? 'text' : 'password'}
+                            value={p.api_key}
+                            onChange={(e) => updateProvider(p.id, { api_key: e.target.value })}
+                            placeholder={p.api_key_masked || 'sk-…'}
+                            autoComplete="off"
+                          />
+                          <button
+                            type="button"
+                            className="settings-eye"
+                            onClick={() =>
+                              setShowKeys((prev) => ({ ...prev, [p.id]: !prev[p.id] }))
+                            }
+                            aria-label={showKeys[p.id] ? 'Hide API key' : 'Show API key'}
+                          >
+                            <span className="material-symbols-outlined" aria-hidden="true">
+                              {showKeys[p.id] ? 'visibility_off' : 'visibility'}
+                            </span>
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          className="settings-test-btn"
+                          onClick={() => void handleTest(p)}
+                          disabled={busy}
+                        >
+                          <span className="material-symbols-outlined" aria-hidden="true">
+                            cable
+                          </span>
+                          {testingId === p.id ? 'Testing…' : 'Test connection'}
+                        </button>
+                      </div>
+                      {p.api_key_set && !p.api_key && (
+                        <span className="settings-hint">Key on file — leave blank to keep.</span>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+
+          {testMsg && (
+            <p className={testOk ? 'settings-ok' : 'settings-error'} role="status">
+              {testMsg}
+            </p>
+          )}
+
+          <div className="settings-provider-actions">
+            <button
+              type="button"
+              className="settings-file-btn"
+              disabled={busy}
+              onClick={() => {
+                const nextPriority =
+                  providers.reduce((max, p) => Math.max(max, Number(p.priority) || 0), 0) + 1
+                const draft = newDraft(nextPriority)
+                setProviders((prev) => [...prev, draft])
+                if (!activeId) setActiveId(draft.id)
+              }}
+            >
+              <span className="material-symbols-outlined" aria-hidden="true">
+                add
+              </span>
+              Add provider
+            </button>
           </div>
 
           <div className="settings-footer">
-            <button type="button" className="settings-text-btn" onClick={() => void handleCancel()} disabled={busy}>
+            <button
+              type="button"
+              className="settings-text-btn"
+              onClick={() => void handleCancel()}
+              disabled={busy}
+            >
               Cancel
             </button>
             <button type="submit" className="settings-save" disabled={busy || !platformName.trim()}>
-              Save Configuration
+              Save configuration
             </button>
           </div>
         </section>

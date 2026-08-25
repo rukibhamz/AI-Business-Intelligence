@@ -106,8 +106,19 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
       const name = file.name.replace(/\.[^.]+$/, '') || 'Dataset'
       const created = await api.uploadSource(name, file)
       await onRefresh()
-      setMappingSourceId(created.id)
-      setOkMsg(`Uploaded “${created.name}”. Confirm field mapping below.`)
+      if (created.mapping_source === 'ai' && created.mapping_status === 'confirmed') {
+        const fields = Object.values(created.field_mapping ?? {}).filter(
+          (f) => f !== 'Unmapped' && f !== 'Ignore',
+        )
+        setOkMsg(
+          `“${created.name}” is ready — the AI mapped ${fields.length} field${
+            fields.length === 1 ? '' : 's'
+          }. Open Re-map to review.`,
+        )
+      } else {
+        setMappingSourceId(created.id)
+        setOkMsg(`Uploaded “${created.name}”. Confirm the field mapping below.`)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
@@ -139,6 +150,46 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
       setMappingSourceId(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Mapping failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handlePrimaryTable(id: number, table: string) {
+    setBusy(true)
+    setError(null)
+    setOkMsg(null)
+    try {
+      const updated = await api.setPrimaryTable(id, table)
+      await onRefresh()
+      setOkMsg(`Now analysing "${table}" in "${updated.name}".`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not switch table')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleAutomap(id: number) {
+    setBusy(true)
+    setError(null)
+    setOkMsg(null)
+    try {
+      const updated = await api.automapSource(id)
+      await onRefresh()
+      const fields = Object.values(updated.field_mapping ?? {}).filter(
+        (f) => f !== 'Unmapped' && f !== 'Ignore',
+      )
+      setOkMsg(
+        fields.length === 0
+          ? `The AI found no recognisable business fields in "${updated.name}" — its columns look technical. Map anything useful by hand below.`
+          : `AI mapped ${fields.length} field${
+              fields.length === 1 ? '' : 's'
+            } in "${updated.name}". Review below if anything looks off.`,
+      )
+      setMappingSourceId(id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Automatic mapping failed')
     } finally {
       setBusy(false)
     }
@@ -182,8 +233,12 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
       setMysqlName('')
       setShowMysql(false)
       await onRefresh()
-      setMappingSourceId(created.id)
-      setOkMsg(`Connected “${created.name}”. Confirm field mapping.`)
+      if (created.mapping_source === 'ai' && created.mapping_status === 'confirmed') {
+        setOkMsg(`Connected “${created.name}” — the AI mapped its columns.`)
+      } else {
+        setMappingSourceId(created.id)
+        setOkMsg(`Connected “${created.name}”. Confirm the field mapping.`)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'MySQL connection failed')
     } finally {
@@ -328,13 +383,32 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
             <section className="ds-mapping">
               <div className="ds-mapping-accent" />
               <div className="ds-mapping-head">
-                <h2>Confirm Field Mapping</h2>
+                <h2>
+                {mappingSource.mapping_source === 'ai'
+                  ? 'Review Field Mapping'
+                  : 'Confirm Field Mapping'}
+              </h2>
                 <span className={`ds-badge${mappingSource.mapping_status === 'confirmed' ? ' is-ok' : ' is-action'}`}>
-                  {mappingSource.mapping_status === 'confirmed' ? 'Mapped' : 'Action Required'}
+                  {mappingSource.mapping_status === 'confirmed'
+                    ? mappingSource.mapping_source === 'ai'
+                      ? 'Mapped by AI'
+                      : 'Mapped'
+                    : 'Action Required'}
                 </span>
               </div>
               <p className="ds-mapping-sub">
-                Mapping columns for <strong>{mappingSource.name}</strong>
+                {mappingSource.mapping_source === 'ai' ? (
+                  <>
+                    The AI read <strong>{mappingSource.name}</strong> and mapped these
+                    columns. Change anything it got wrong.
+                  </>
+                ) : (
+                  <>
+                    Mapping columns for <strong>{mappingSource.name}</strong> by column
+                    name. Connect an AI provider in Settings for mapping based on the
+                    actual values.
+                  </>
+                )}
               </p>
               <div className="ds-mapping-table-wrap">
                 <table>
@@ -405,16 +479,47 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
                     <h3 title={s.name}>{s.name}</h3>
                   </div>
                   <span className={`ds-status ds-status--${status}`}>
-                    {status === 'processed' ? 'Processed' : 'Action needed'}
+                    {status === 'processed'
+                      ? s.mapping_source === 'ai'
+                        ? 'Mapped by AI'
+                        : 'Processed'
+                      : 'Needs mapping'}
                   </span>
                 </div>
                 <p className="ds-rows">
                   {formatRows(s.row_count)} rows · {s.source_type}
                 </p>
                 {mappedSummary(s) && <p className="ds-mapped">{mappedSummary(s)}</p>}
+                {(s.tables?.length ?? 0) > 1 && (
+                  <label className="ds-table-pick">
+                    <span>Analysing</span>
+                    <select
+                      value={s.primary_table ?? ''}
+                      disabled={busy}
+                      onChange={(e) => void handlePrimaryTable(s.id, e.target.value)}
+                    >
+                      {(s.tables ?? []).map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="ds-table-count">of {s.tables?.length} tables</span>
+                  </label>
+                )}
                 <div className="ds-card-actions">
                   <button type="button" className="ds-link" disabled={busy} onClick={() => openMapping(s.id)}>
                     Re-map
+                  </button>
+                  <span className="ds-dot">•</span>
+                  <button
+                    type="button"
+                    className="ds-link"
+                    disabled={busy}
+                    title="Let the AI read the data and map the columns"
+                    onClick={() => void handleAutomap(s.id)}
+                  >
+                    Auto-map
                   </button>
                   <span className="ds-dot">•</span>
                   <button type="button" className="ds-link muted" disabled={busy} onClick={() => void handleRecompute(s.id)}>

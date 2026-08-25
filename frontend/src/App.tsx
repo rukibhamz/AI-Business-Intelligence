@@ -14,6 +14,7 @@ import {
 import { CommandPalette, type PaletteAction } from './components/CommandPalette'
 import { InlineMessage } from './components/Feedback'
 import { AppShell } from './layouts/AppShell'
+import { setCurrency } from './lib/format'
 import { useRouter } from './lib/router'
 import { startNewSession } from './lib/session'
 import { AskAiPage } from './pages/AskAiPage'
@@ -48,11 +49,8 @@ function App() {
   const [refreshToken, setRefreshToken] = useState(0)
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null)
 
-  const focusQueryId = (() => {
-    const raw = new URLSearchParams(location.search).get('q')
-    const parsed = raw ? Number(raw) : NaN
-    return Number.isFinite(parsed) ? parsed : null
-  })()
+  /** Conversation addressed by the URL, e.g. /ask?c=s_abc123 */
+  const conversationId = new URLSearchParams(location.search).get('c')
 
   useEffect(() => {
     const token = getToken()
@@ -81,7 +79,11 @@ function App() {
     setHealth(h)
     setSources(s)
     setQueries(q)
-    if (settings) setBranding(settings)
+    if (settings) {
+      setBranding(settings)
+      // Every money figure renders in the admin's chosen currency.
+      setCurrency(settings.currency)
+    }
   }, [])
 
   const loadFindings = useCallback(async () => {
@@ -151,7 +153,7 @@ function App() {
     } else if (action.kind === 'source') {
       navigate('sources')
     } else if (action.kind === 'query') {
-      navigate('history', { search: `?q=${action.id}` })
+      navigate('history')
     } else if (action.kind === 'ask') {
       setPendingQuestion(action.text)
       navigate('chat')
@@ -168,7 +170,16 @@ function App() {
   }
 
   if (!user) {
-    return <LoginPage onSuccess={setUser} branding={branding} />
+    return (
+      <LoginPage
+        branding={branding}
+        onSuccess={(loggedIn) => {
+          setUser(loggedIn)
+          // Sign-in always lands on a fresh analysis, whatever URL was open.
+          navigate('chat', { replace: true })
+        }}
+      />
+    )
   }
 
   return (
@@ -230,6 +241,8 @@ function App() {
             branding={branding}
             pendingQuestion={pendingQuestion}
             onPendingConsumed={() => setPendingQuestion(null)}
+            conversationId={conversationId}
+            onConversationChange={(id) => setSearch(id ? `?c=${encodeURIComponent(id)}` : '')}
             onAnswered={() => {
               void api.listQueries().then(setQueries).catch(() => undefined)
             }}
@@ -238,18 +251,25 @@ function App() {
 
         {view === 'history' && (
           <HistoryPage
-            branding={branding}
-            user={user}
-            focusQueryId={focusQueryId}
-            onSelectQuery={(id) => setSearch(id == null ? '' : `?q=${id}`)}
-            onNewAnalysis={() => {
+            onOpenConversation={(id) =>
+              navigate('chat', { search: `?c=${encodeURIComponent(id)}` })
+            }
+            onNewChat={() => {
               startNewSession()
               navigate('chat')
             }}
           />
         )}
 
-        {view === 'settings' && <SettingsPage onSaved={setBranding} />}
+        {view === 'settings' && (
+          <SettingsPage
+            onSaved={(saved) => {
+              setBranding(saved)
+              setCurrency(saved.currency)
+              refreshAll()
+            }}
+          />
+        )}
       </AppShell>
 
       {paletteOpen && (

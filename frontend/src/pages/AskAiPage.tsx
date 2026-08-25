@@ -4,12 +4,14 @@ import {
   parseSchema,
   type AppSettings,
   type DataSource,
+  type Diagnosis,
   type QueryRecord,
+  type Recommendation,
   type ResponseFormat,
 } from '../api/client'
 import { ResultChart } from '../components/ResultChart'
-import { formatCell } from '../lib/format'
-import { getSessionId, startNewSession, THREAD_KEY } from '../lib/session'
+import { formatCell, formatValue } from '../lib/format'
+import { getSessionId, startNewSession } from '../lib/session'
 import './AskAiPage.css'
 
 /** Workspace-wide suggestion chips derived from the real schemas on file. */
@@ -76,56 +78,37 @@ type Props = {
   pendingQuestion?: string | null
   onPendingConsumed?: () => void
   onAnswered?: () => void
+  /** Conversation to open, from `?c=` in the URL. Absent means the live one. */
+  conversationId?: string | null
+  /** Puts the active conversation in the URL so a reload reopens it. */
+  onConversationChange?: (id: string | null) => void
 }
 
 /**
- * The thread survives navigation and reloads. Only light metadata is stored —
- * result rows are re-fetched from the API by query id so the transcript can
- * never drift from what the server actually returned. `THREAD_KEY` lives in
- * lib/session so starting a new session clears it in one step.
+ * Transcripts live on the server: every question is already persisted as a
+ * query row, so a conversation is rebuilt from the API rather than from
+ * browser storage. That keeps history, reloads, and other devices consistent.
  */
-type StoredMessage = {
-  id: string
-  role: 'user' | 'assistant'
-  text: string
-  question?: string
-  queryId?: number
-  error?: string
-  pinned?: boolean
-  at: number
-}
-
-function saveThread(messages: ChatMessage[]) {
-  try {
-    const slim: StoredMessage[] = messages.map((m) =>
-      m.role === 'user'
-        ? { id: m.id, role: 'user', text: m.text, at: m.at }
-        : {
-            id: m.id,
-            role: 'assistant',
-            text: m.text,
-            question: m.question,
-            queryId: m.query?.id,
-            error: m.error,
-            pinned: m.pinned,
-            at: m.at,
-          },
-    )
-    sessionStorage.setItem(THREAD_KEY, JSON.stringify(slim))
-  } catch {
-    /* storage unavailable or full */
+function messagesFromRecords(records: QueryRecord[]): ChatMessage[] {
+  const out: ChatMessage[] = []
+  for (const record of records) {
+    const at = new Date(record.created_at).getTime()
+    out.push({ id: `u-${record.id}`, role: 'user', text: record.natural_language, at })
+    out.push({
+      id: `a-${record.id}`,
+      role: 'assistant',
+      text:
+        record.answer ??
+        record.explanation ??
+        (record.result ? `Returned ${record.result.rows.length} row(s).` : 'Query completed.'),
+      question: record.natural_language,
+      query: record,
+      error: record.status === 'failed' ? 'This question did not complete.' : undefined,
+      sqlOpen: false,
+      at,
+    })
   }
-}
-
-function readStoredThread(): StoredMessage[] {
-  try {
-    const raw = sessionStorage.getItem(THREAD_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed) ? (parsed as StoredMessage[]) : []
-  } catch {
-    return []
-  }
+  return out
 }
 
 const CHART_TITLE: Record<string, string> = {
@@ -133,6 +116,55 @@ const CHART_TITLE: Record<string, string> = {
   line: 'Trend',
   bar: 'Comparison',
 }
+
+/**
+ * What the server is doing, roughly. It no longer always writes SQL — a "why"
+ * question is answered by comparing periods instead — so the label stays
+ * truthful about the work rather than naming one implementation of it.
+ */
+const THINKING_STAGES: { after: number; label: string }[] = [
+  { after: 0, label: 'Thinking…' },
+  { after: 2500, label: 'Working through your data…' },
+  { after: 7000, label: 'Crunching the numbers…' },
+  { after: 15000, label: 'Still going — a large dataset takes a moment…' },
+]
+
+function useThinkingLabel(active: boolean): string {
+  const [stage, setStage] = useState(0)
+
+  useEffect(() => {
+    if (!active) {
+      setStage(0)
+      return
+    }
+    const timers = THINKING_STAGES.slice(1).map((step, index) =>
+      window.setTimeout(() => setStage(index + 1), step.after),
+    )
+    return () => timers.forEach(window.clearTimeout)
+  }, [active])
+
+  return THINKING_STAGES[stage].label
+}
+
+const PRIORITY_LABEL: Record<Recommendation['priority'], string> = {
+  now: 'Do now',
+  next: 'Do next',
+  watch: 'Keep watching',
+}
+
+/** Money measures read as currency; counts read as plain numbers. */
+const MONEY_MEASURES = new Set(['revenue', 'profit', 'cost', 'sales', 'marketing spend'])
+
+function measureFormatter(measure: string) {
+  const kind = MONEY_MEASURES.has(measure) ? 'currency' : 'number'
+  return (value: number) => formatValue(value, kind)
+}
+
+/**
+ * A "why" answer earns a follow-up. Offering it is how someone discovers they
+ * can ask for the remedy as well as the cause.
+ */
+const FOLLOW_UPS = ['What should we do about it?', 'How do we prevent this happening again?']
 
 function uid() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
@@ -147,8 +179,14 @@ function timeLabel(at: number) {
  * HTTPException but as an array of objects for 422 validation errors, and
  * rendering that array directly would crash React.
  */
+/** fetch() rejects with a TypeError when the request never reached the server. */
+const NETWORK_FAILURES = ['failed to fetch', 'networkerror', 'load failed', 'network request failed']
+
 function errorDetail(err: unknown): string {
   const message = err instanceof Error ? err.message : 'Query failed'
+  if (NETWORK_FAILURES.some((hint) => message.toLowerCase().includes(hint))) {
+    return 'Could not reach the server. Check that the backend is running, then try again.'
+  }
   try {
     const parsed = JSON.parse(message) as { detail?: unknown }
     const detail = parsed.detail
@@ -181,11 +219,14 @@ export function AskAiPage({
   pendingQuestion,
   onPendingConsumed,
   onAnswered,
+  conversationId,
+  onConversationChange,
 }: Props) {
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [restoring, setRestoring] = useState(() => readStoredThread().length > 0)
+  const [restoring, setRestoring] = useState(true)
+  const [title, setTitle] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   /** Answers that lead with prose or a chart keep their rows collapsed. */
   const [tableOpen, setTableOpen] = useState<Set<string>>(() => new Set())
@@ -197,56 +238,38 @@ export function AskAiPage({
 
   const hasSources = sources.length > 0
   const suggestions = useMemo(() => suggestionsForWorkspace(sources), [sources])
+  const thinkingLabel = useThinkingLabel(busy)
   const assistantName = branding?.platform_name || 'Cognitive Logic'
   const isEmpty = messages.length === 0 && !busy && !restoring
 
-  // --- restore the thread ------------------------------------------------
+  // The chat being viewed: an explicit conversation from the URL, or the one
+  // this browser session started.
+  const activeId = conversationId ?? getSessionId()
+
+  // --- load the conversation from the server ------------------------------
   useEffect(() => {
-    const stored = readStoredThread()
-    if (stored.length === 0) return
     let cancelled = false
-
-    void (async () => {
-      const ids = [...new Set(stored.map((m) => m.queryId).filter((id): id is number => !!id))]
-      const records = new Map<number, QueryRecord>()
-      await Promise.all(
-        ids.map(async (id) => {
-          try {
-            records.set(id, await api.getQuery(id))
-          } catch {
-            /* the query was deleted with its data source */
-          }
-        }),
-      )
-      if (cancelled) return
-      setMessages(
-        stored.map((m) =>
-          m.role === 'user'
-            ? { id: m.id, role: 'user', text: m.text, at: m.at }
-            : {
-                id: m.id,
-                role: 'assistant',
-                text: (m.queryId ? records.get(m.queryId)?.answer : null) ?? m.text,
-                question: m.question ?? '',
-                query: m.queryId ? records.get(m.queryId) : undefined,
-                error: m.error,
-                pinned: m.pinned,
-                sqlOpen: false,
-                at: m.at,
-              },
-        ),
-      )
-      setRestoring(false)
-    })()
-
+    setRestoring(true)
+    void api
+      .getConversation(activeId)
+      .then((conversation) => {
+        if (cancelled) return
+        setMessages(messagesFromRecords(conversation.messages))
+        setTitle(conversation.title)
+      })
+      .catch(() => {
+        // A brand-new chat has no rows yet; that is not an error.
+        if (cancelled) return
+        setMessages([])
+        setTitle(null)
+      })
+      .finally(() => {
+        if (!cancelled) setRestoring(false)
+      })
     return () => {
       cancelled = true
     }
-  }, [])
-
-  useEffect(() => {
-    if (!restoring) saveThread(messages)
-  }, [messages, restoring])
+  }, [activeId])
 
   // Scroll the thread container only — never the whole document.
   useEffect(() => {
@@ -283,7 +306,7 @@ export function AskAiPage({
 
       try {
         const result = await api.runQuery(question, {
-          sessionId: getSessionId(),
+          sessionId: activeId,
           signal: controller.signal,
         })
         const summary =
@@ -303,6 +326,16 @@ export function AskAiPage({
           },
         ])
         onAnswered?.()
+
+        // First answer in a new chat: publish it to the URL and pick up the
+        // server-derived title so the toolbar and History agree.
+        if (!title) {
+          void api
+            .getConversation(activeId)
+            .then((conversation) => setTitle(conversation.title))
+            .catch(() => undefined)
+          onConversationChange?.(activeId)
+        }
       } catch (err) {
         if (controller.signal.aborted) {
           setMessages((prev) => [
@@ -333,7 +366,7 @@ export function AskAiPage({
         setBusy(false)
       }
     },
-    [busy, hasSources, onAnswered],
+    [busy, hasSources, onAnswered, activeId, title, onConversationChange],
   )
 
   // A question handed over from the command palette runs once data is ready.
@@ -347,12 +380,28 @@ export function AskAiPage({
     abortRef.current?.abort()
   }
 
-  function newSession() {
+  function newChat() {
     abortRef.current?.abort()
     setMessages([])
+    setTitle(null)
     setDraft('')
     startNewSession()
+    onConversationChange?.(null)
     textareaRef.current?.focus()
+  }
+
+  async function renameChat() {
+    const next = window.prompt('Rename this chat', title ?? '')
+    if (next == null) return
+    const trimmed = next.trim()
+    if (!trimmed || trimmed === title) return
+    try {
+      const updated = await api.renameConversation(activeId, trimmed)
+      setTitle(updated.title)
+      onAnswered?.()
+    } catch {
+      /* the chat has no saved questions yet */
+    }
   }
 
   function retry(msg: AssistantMessage) {
@@ -401,6 +450,73 @@ export function AskAiPage({
     }
   }
 
+  /** Where the change happened: the segments that moved, and by how much. */
+  function renderDiagnosis(diagnosis: Diagnosis) {
+    const fmt = measureFormatter(diagnosis.measure_label)
+    const signed = (value: number) => `${value >= 0 ? '+' : '−'}${fmt(Math.abs(value))}`
+    const drivers = diagnosis.drivers ?? []
+    const factors = (diagnosis.factors ?? []).filter((f) => f.kind !== 'baseline')
+
+    return (
+      <section className="ask-card ask-diagnosis">
+        <header className="ask-card-head">
+          <h4>What moved</h4>
+          <span className="ask-card-meta">
+            {diagnosis.period_label} vs {diagnosis.previous_label}
+          </span>
+        </header>
+
+        <div className={`ask-diag-move is-${diagnosis.direction}`}>
+          <span className="ask-diag-delta">{signed(diagnosis.change)}</span>
+          <span className="ask-diag-detail">
+            {diagnosis.measure_label} went {fmt(diagnosis.previous)} → {fmt(diagnosis.current)}
+            {diagnosis.change_pct != null && ` (${diagnosis.change_pct > 0 ? '+' : ''}${Math.round(
+              diagnosis.change_pct,
+            )}%)`}
+          </span>
+        </div>
+
+        {drivers.length > 0 && (
+          <ul className="ask-driver-list">
+            {drivers.map((driver) => (
+              <li key={`${driver.dimension}-${driver.label}`} className={`is-${driver.direction}`}>
+                <div className="ask-driver-head">
+                  <span className="ask-driver-label">{driver.label}</span>
+                  <span className="ask-driver-change">{signed(driver.change)}</span>
+                </div>
+                <div className="ask-driver-track">
+                  <span style={{ width: `${Math.min(100, Math.max(2, driver.share))}%` }} />
+                </div>
+                <span className="ask-driver-share">
+                  {Math.round(driver.share)}% of the movement
+                  {driver.change_pct != null &&
+                    ` · ${driver.change_pct > 0 ? '+' : ''}${Math.round(driver.change_pct)}% on ${
+                      diagnosis.previous_label
+                    }`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {factors.length > 0 && (
+          <ul className="ask-factor-list">
+            {factors.map((factor) => (
+              <li key={factor.kind}>{factor.detail}</li>
+            ))}
+          </ul>
+        )}
+
+        <p className="ask-diag-note">
+          Measured across {diagnosis.rows_analyzed.toLocaleString()} row
+          {diagnosis.rows_analyzed === 1 ? '' : 's'}
+          {diagnosis.dimension ? ` by ${diagnosis.dimension.toLowerCase()}` : ''}. This shows where
+          the change happened, not why — check the segments above before acting.
+        </p>
+      </section>
+    )
+  }
+
   function renderAssistant(msg: AssistantMessage) {
     const result = msg.query?.result
     const rows = result?.rows ?? []
@@ -414,6 +530,11 @@ export function AskAiPage({
     const format: ResponseFormat = msg.query?.response_format ?? (rows.length ? 'table' : 'empty')
     const chart = msg.query?.chart
     const showChart = Boolean(result && chart && chart.type !== 'table')
+
+    // A "why" answer ships with the evidence behind it and, when the question
+    // asked for them, the actions it supports.
+    const diagnosis = msg.query?.diagnosis ?? null
+    const recommendations = msg.query?.recommendations ?? []
 
     const metricValue = (() => {
       if (format !== 'metric' || rows.length === 0) return null
@@ -454,6 +575,50 @@ export function AskAiPage({
           </div>
 
           <p className="ask-answer">{msg.text}</p>
+
+          {diagnosis && renderDiagnosis(diagnosis)}
+
+          {recommendations.length > 0 && (
+            <section className="ask-card ask-actions">
+              <header className="ask-card-head">
+                <h4>Recommended actions</h4>
+                <span className="ask-card-meta">
+                  {recommendations.length} suggested from the evidence above
+                </span>
+              </header>
+              <ol className="ask-action-list">
+                {recommendations.map((action, index) => (
+                  <li key={`${action.title}-${index}`} className={`ask-action is-${action.priority}`}>
+                    <span className="ask-action-priority">{PRIORITY_LABEL[action.priority]}</span>
+                    <div className="ask-action-body">
+                      <h5>{action.title}</h5>
+                      <p>{action.detail}</p>
+                      {action.basis && <p className="ask-action-basis">{action.basis}</p>}
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+
+          {diagnosis && recommendations.length === 0 && (
+            <div className="ask-followups">
+              {FOLLOW_UPS.map((question) => (
+                <button
+                  key={question}
+                  type="button"
+                  className="ask-suggest ask-suggest--inline"
+                  onClick={() => void sendQuestion(question)}
+                  disabled={busy}
+                >
+                  <span className="material-symbols-outlined" aria-hidden="true">
+                    lightbulb
+                  </span>
+                  <span>{question}</span>
+                </button>
+              ))}
+            </div>
+          )}
 
           {metricValue && (
             <div className="ask-metric">
@@ -613,15 +778,28 @@ export function AskAiPage({
     <div className={`ask-ai${isEmpty ? ' ask-ai--empty' : ''}`}>
       {!isEmpty && (
         <div className="ask-toolbar">
-          <span className="ask-toolbar-label">
-            {messages.filter((m) => m.role === 'user').length} question
-            {messages.filter((m) => m.role === 'user').length === 1 ? '' : 's'} in this session
-          </span>
-          <button type="button" className="ask-toolbar-btn" onClick={newSession}>
+          <div className="ask-toolbar-copy">
+            <button
+              type="button"
+              className="ask-toolbar-title"
+              onClick={() => void renameChat()}
+              title="Rename this chat"
+            >
+              <span className="ask-toolbar-title-text">{title ?? 'New chat'}</span>
+              <span className="material-symbols-outlined" aria-hidden="true">
+                edit
+              </span>
+            </button>
+            <span className="ask-toolbar-label">
+              {messages.filter((m) => m.role === 'user').length} message
+              {messages.filter((m) => m.role === 'user').length === 1 ? '' : 's'}
+            </span>
+          </div>
+          <button type="button" className="ask-toolbar-btn" onClick={newChat}>
             <span className="material-symbols-outlined" aria-hidden="true">
               add_comment
             </span>
-            New session
+            New chat
           </button>
         </div>
       )}
@@ -630,7 +808,7 @@ export function AskAiPage({
         {restoring && (
           <div className="ask-restoring">
             <span className="cl-spinner" aria-hidden="true" />
-            Restoring your analysis…
+            Loading this chat…
           </div>
         )}
 
@@ -696,7 +874,7 @@ export function AskAiPage({
                       <i />
                       <i />
                     </span>
-                    Writing SQL and querying your data…
+                    {thinkingLabel}
                   </div>
                 </div>
               </div>

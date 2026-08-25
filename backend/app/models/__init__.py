@@ -17,9 +17,9 @@ class User(Base):
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    data_sources: Mapped[list["DataSource"]] = relationship(back_populates="owner")
-    queries: Mapped[list["Query"]] = relationship(back_populates="user")
-    dashboards: Mapped[list["Dashboard"]] = relationship(back_populates="owner")
+    data_sources: Mapped[list[DataSource]] = relationship(back_populates="owner")
+    queries: Mapped[list[Query]] = relationship(back_populates="user")
+    dashboards: Mapped[list[Dashboard]] = relationship(back_populates="owner")
 
 
 class DataSource(Base):
@@ -36,8 +36,8 @@ class DataSource(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
-    owner: Mapped["User | None"] = relationship(back_populates="data_sources")
-    queries: Mapped[list["Query"]] = relationship(back_populates="data_source")
+    owner: Mapped[User | None] = relationship(back_populates="data_sources")
+    queries: Mapped[list[Query]] = relationship(back_populates="data_source")
 
 
 class Query(Base):
@@ -54,10 +54,30 @@ class Query(Base):
     session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     answer: Mapped[str | None] = mapped_column(Text, nullable=True)
     response_format: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    #: Measured drivers and recommended actions, when the question asked why.
+    diagnosis_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    user: Mapped["User | None"] = relationship(back_populates="queries")
-    data_source: Mapped["DataSource"] = relationship(back_populates="queries")
+    user: Mapped[User | None] = relationship(back_populates="queries")
+    data_source: Mapped[DataSource] = relationship(back_populates="queries")
+
+
+class Conversation(Base):
+    """A chat thread. Queries join to it through `Query.session_id`.
+
+    The id is minted client-side when a chat starts, so the row is created
+    lazily on the first question rather than up front.
+    """
+
+    __tablename__ = "conversations"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    title: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
 
 
 class Dashboard(Base):
@@ -72,7 +92,7 @@ class Dashboard(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
-    owner: Mapped["User | None"] = relationship(back_populates="dashboards")
+    owner: Mapped[User | None] = relationship(back_populates="dashboards")
 
 
 class AppConfig(Base):
