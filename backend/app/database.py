@@ -5,7 +5,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
-from app.config import settings
+from app.config import ConfigurationError, describe_database_url_problem, settings
 
 
 def _async_engine_url(url: str) -> str:
@@ -25,6 +25,13 @@ def _connect_args(url: str) -> dict:
         return {"statement_cache_size": 0}
     return {}
 
+
+# Checked before the engine exists, because building it is what parses the URL:
+# a malformed one raises from inside urllib at import time, with a message about
+# IPv6 addresses that has nothing to do with the actual mistake.
+_database_problem = describe_database_url_problem(settings.database_url)
+if _database_problem:
+    raise ConfigurationError(_database_problem)
 
 engine = create_async_engine(
     _async_engine_url(settings.database_url),

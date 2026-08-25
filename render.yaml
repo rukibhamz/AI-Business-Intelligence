@@ -1,5 +1,18 @@
 # Render blueprint for the API. The frontend goes to Vercel (see frontend/vercel.json)
 # and the database to Supabase/Neon — set DATABASE_URL to that connection string.
+#
+# Two things Render will reject or trip over, and how this file handles them:
+#
+# 1. Disks require a paid instance type. A `disk:` block on `plan: free` fails
+#    validation, so the disk below is commented out. On the free plan uploaded
+#    files live on an ephemeral filesystem and are lost on every redeploy — the
+#    database rows survive, the CSVs do not. Move to `plan: starter` and
+#    uncomment the disk to keep them.
+#
+# 2. The service refuses to start in production if SECRET_KEY, ADMIN_PASSWORD or
+#    CORS_ORIGINS are unsafe — it says which in the logs. Every `sync: false`
+#    value below must be filled in on the Render dashboard before the first
+#    deploy, or the health check fails and the deploy is marked failed.
 services:
   - type: web
     name: ai-bi-api
@@ -15,24 +28,44 @@ services:
         value: "false"
       - key: EXPOSE_API_DOCS
         value: "false"
+      # Matches the Dockerfile default. Point this at /data/uploads only when a
+      # disk is mounted; without one the path is ephemeral either way.
       - key: UPLOAD_DIR
-        value: /data/uploads
+        value: /app/uploads
       - key: SECRET_KEY
         generateValue: true
-      # Set these in the Render dashboard — never commit them.
+
+      # --- fill these in on the dashboard; never commit them ----------------
+      # Postgres connection string. A `postgres://` URI with `?sslmode=require`
+      # is fine — the API rewrites it for the async driver on startup.
       - key: DATABASE_URL
+        sync: false
+      # At least 12 characters, or the service refuses to start.
+      - key: ADMIN_PASSWORD
         sync: false
       - key: ADMIN_EMAIL
         sync: false
-      - key: ADMIN_PASSWORD
-        sync: false
+      # Exact https origins, comma separated. Not "*", and not empty.
       - key: CORS_ORIGINS
         sync: false
       - key: OPENAI_API_KEY
         sync: false
-    disk:
-      # Free-tier instances have ephemeral filesystems; without a disk every
-      # uploaded CSV is lost on redeploy.
-      name: uploads
-      mountPath: /data
-      sizeGB: 1
+
+      # --- Supabase sign-in (optional) --------------------------------------
+      # Set the first two and accounts move to Supabase; leave them empty and
+      # the API keeps its own local admin account. SUPABASE_JWT_SECRET is only
+      # needed for projects still issuing HS256 tokens.
+      # Never put the service_role key in any of these.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+
+    # Uncomment together with `plan: starter` to keep uploaded files across
+    # deploys, and set UPLOAD_DIR to /data/uploads.
+    # disk:
+    #   name: uploads
+    #   mountPath: /data
+    #   sizeGB: 1

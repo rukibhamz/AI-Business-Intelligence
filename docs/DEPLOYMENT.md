@@ -116,12 +116,51 @@ Prefer the Docker blueprint in `render.yaml`.
 
 1. New → Blueprint → point at this repo. `render.yaml` builds
    `backend/Dockerfile`.
-2. Set the secrets marked `sync: false` in the dashboard: `DATABASE_URL`,
-   `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `CORS_ORIGINS`, `OPENAI_API_KEY`.
-   `SECRET_KEY` is generated for you.
-3. The blueprint mounts a 1 GB disk at `/data`. **Without it every uploaded
-   CSV is lost on redeploy** — free instances have ephemeral filesystems.
-4. Health check is `/api/health`.
+2. Set the secrets marked `sync: false` in the dashboard **before the first
+   deploy**: `DATABASE_URL`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `CORS_ORIGINS`,
+   `OPENAI_API_KEY`. `SECRET_KEY` is generated for you. Supabase sign-in adds
+   `SUPABASE_URL`, `SUPABASE_ANON_KEY` and, for older projects,
+   `SUPABASE_JWT_SECRET`.
+3. Health check is `/api/health`.
+
+**Disks need a paid instance.** A `disk:` block on `plan: free` is rejected
+when the blueprint is validated, so the disk in `render.yaml` is commented out.
+On the free plan the filesystem is ephemeral: database rows survive a redeploy,
+uploaded CSVs do not. To keep them, switch to `plan: starter`, uncomment the
+disk, and set `UPLOAD_DIR=/data/uploads`.
+
+### 3.2.1 Which Supabase connection string to copy
+
+Supabase shows two. **Use the pooler**, not the direct connection:
+
+| | Host | Port | Works on Render free? |
+|---|---|---|---|
+| Direct connection | `db.<ref>.supabase.co` | 5432 | ✗ IPv6-only; Render's free tier is IPv4-only |
+| **Transaction pooler** | `aws-0-<region>.pooler.supabase.com` | 6543 | ✓ |
+
+Copy it from **Project Settings → Database → Connection string → URI**, then
+**replace `[YOUR-PASSWORD]`** with the real password. Leaving the placeholder in
+is the single most common cause of a failed first deploy — the brackets make the
+URL unparseable and the error talks about IPv6 addresses.
+
+If the password contains `@ : / ? # [ ]`, percent-encode it (`@` → `%40`).
+
+### 3.2.2 When the deploy fails
+
+Three failures account for nearly all of them. The logs name the cause in each
+case — read them before changing anything.
+
+| What you see | Cause | Fix |
+|---|---|---|
+| Blueprint rejected before any build | `disk:` on a free instance | Keep the disk commented out, or move to `plan: starter` |
+| `'aws-0-….pooler.supabase.com' does not appear to be an IPv4 or IPv6 address` | `DATABASE_URL` still contains Supabase's `[YOUR-PASSWORD]` placeholder. `urlsplit` reads the brackets as an IPv6 host and blames the hostname | Replace the placeholder with the real password. The API now refuses to start with a message naming the placeholder instead of this one |
+| `connect() got an unexpected keyword argument 'sslmode'` | libpq-only parameters in `DATABASE_URL` reaching asyncpg | Already handled — the API rewrites `sslmode=require` to `ssl=require` and drops `channel_binding` on startup. If you still see it, the service is running an older build |
+| `prepared statement "__asyncpg_stmt_…" does not exist` | Supabase's transaction pooler (port 6543) multiplexes connections | Already handled — statement caching is switched off automatically for pooler URLs |
+| Render installs Python 3.14 and `asyncpg` fails to build | A native Python service ignoring `backend/runtime.txt` because the service root is the repo root | `.python-version` and `runtime.txt` now exist at both levels. Better: use the Docker blueprint, which pins 3.12 in the image |
+| `Refusing to start with N unsafe production setting(s)` | `SECRET_KEY`, `ADMIN_PASSWORD` (min 12 characters) or `CORS_ORIGINS` (exact https origins, never `*`) not set | Set them in the dashboard and redeploy; the log lists exactly which |
+
+A service that builds but never passes the health check is almost always the
+third row: the process aborts on purpose, and Render reports it as a timeout.
 
 > Render's free tier sleeps when idle. The first request after a sleep takes
 > ~30 s, which looks like a hang in the UI. Use a paid instance if that matters.

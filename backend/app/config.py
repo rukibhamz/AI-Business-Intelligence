@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 from typing import Any
+from urllib.parse import parse_qsl, urlencode
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -15,8 +16,38 @@ class ConfigurationError(RuntimeError):
     """Raised when production settings are unsafe. Startup aborts."""
 
 
+#: Query parameters libpq understands and asyncpg does not. SQLAlchemy hands
+#: every unrecognised parameter to `asyncpg.connect()` as a keyword argument, so
+#: leaving one in place ends the deploy with
+#: `connect() got an unexpected keyword argument 'sslmode'`.
+_LIBPQ_ONLY_PARAMS = (
+    "channel_binding",
+    "sslrootcert",
+    "sslcert",
+    "sslkey",
+    "sslpassword",
+    "gssencmode",
+    "options",
+    "application_name",
+    "keepalives",
+    "keepalives_idle",
+    "keepalives_interval",
+    "keepalives_count",
+)
+
+
 def normalize_database_url(url: str) -> str:
-    """Supabase/Neon copy URIs as postgresql:// — this app needs an async driver."""
+    """Make a hosted Postgres connection string usable by asyncpg.
+
+    Supabase, Neon and Render all hand out libpq-style URIs. Three things have
+    to change before SQLAlchemy can open them:
+
+    * the scheme becomes `postgresql+asyncpg://`;
+    * `sslmode=require` becomes `ssl=require`, which is the same instruction in
+      the spelling asyncpg accepts;
+    * parameters only libpq knows are dropped rather than forwarded into a
+      `TypeError` at startup.
+    """
     value = (url or "").strip()
     if value.startswith("postgres://"):
         value = "postgresql://" + value[len("postgres://") :]
@@ -26,7 +57,127 @@ def normalize_database_url(url: str) -> str:
         value = "postgresql+asyncpg://" + value[len("postgresql+psycopg2://") :]
     elif value.startswith("postgresql+psycopg://"):
         value = "postgresql+asyncpg://" + value[len("postgresql+psycopg://") :]
-    return value
+
+    if not value.startswith("postgresql+asyncpg://"):
+        return value
+
+    value = _unwrap_bracketed_host(value)
+
+    # Supabase's transaction pooler (port 6543) multiplexes connections, so a
+    # prepared statement created on one does not exist on the next. asyncpg
+    # caches them by default, which surfaces later as
+    # `prepared statement "__asyncpg_stmt_1__" does not exist`.
+    if _is_transaction_pooler(value):
+        value = _with_param(value, "prepared_statement_cache_size", "0")
+
+    if "?" not in value:
+        return value
+
+    base, _, query = value.partition("?")
+    kept: list[tuple[str, str]] = []
+    for key, raw in parse_qsl(query, keep_blank_values=True):
+        name = key.lower()
+        if name in _LIBPQ_ONLY_PARAMS:
+            continue
+        if name == "sslmode":
+            # "disable" is the one mode that means "do not use SSL at all".
+            if raw.lower() != "disable":
+                kept.append(("ssl", raw))
+            continue
+        kept.append((key, raw))
+
+    return f"{base}?{urlencode(kept)}" if kept else base
+
+
+def _split_netloc(url: str) -> tuple[str, str, str]:
+    """(prefix, netloc, suffix) without going through urlsplit.
+
+    urlsplit is what raises on a malformed URL, so it cannot be used to
+    diagnose one.
+    """
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        return url, "", ""
+    netloc, slash, path = rest.partition("/")
+    return f"{scheme}://", netloc, f"{slash}{path}"
+
+
+def _unwrap_bracketed_host(url: str) -> str:
+    """Remove square brackets around a hostname that is not an IPv6 literal.
+
+    Brackets in a URL mean "this is an IPv6 address". Around a DNS name they
+    make the whole URL unparseable, and the error blames the hostname rather
+    than the brackets.
+    """
+    prefix, netloc, suffix = _split_netloc(url)
+    if "[" not in netloc:
+        return url
+    userinfo, at, host = netloc.rpartition("@")
+    if not host.startswith("["):
+        return url
+    inside, closed, port = host[1:].partition("]")
+    if not closed or ":" in inside:  # a real IPv6 literal keeps its brackets
+        return url
+    return f"{prefix}{userinfo}{at}{inside}{port}{suffix}"
+
+
+def _is_transaction_pooler(url: str) -> bool:
+    _, netloc, _ = _split_netloc(url)
+    host = netloc.rpartition("@")[2]
+    return host.endswith(":6543") or "pooler.supabase.com" in host
+
+
+def _with_param(url: str, key: str, value: str) -> str:
+    base, sep, query = url.partition("?")
+    if key in query:
+        return url
+    joined = f"{query}&{key}={value}" if sep else f"{key}={value}"
+    return f"{base}?{joined}"
+
+
+def describe_database_url_problem(url: str) -> str | None:
+    """A readable reason the connection string cannot be used, or None.
+
+    Without this the first sign of trouble is a ValueError from deep inside
+    urllib saying a Supabase hostname "does not appear to be an IPv4 or IPv6
+    address" — which is true, and completely misleading: the brackets it is
+    complaining about are usually an unreplaced password placeholder.
+    """
+    value = (url or "").strip()
+    if not value:
+        return "DATABASE_URL is empty."
+
+    prefix, netloc, _ = _split_netloc(value)
+    if not prefix:
+        return (
+            "DATABASE_URL is not a connection URL. It should look like "
+            "postgresql://user:password@host:5432/database"
+        )
+
+    # SQLite addresses a file, not a server: no host, no credentials, nothing
+    # here applies.
+    if value.startswith("sqlite"):
+        return None
+
+    userinfo = netloc.rpartition("@")[0]
+    if "[" in userinfo or "]" in userinfo:
+        return (
+            "DATABASE_URL still contains the password placeholder from the "
+            "Supabase dashboard. Replace [YOUR-PASSWORD] with the real database "
+            "password, and percent-encode any of @ : / ? # [ ] it contains "
+            "(@ becomes %40)."
+        )
+
+    try:
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(value)
+        if not parsed.hostname:
+            return "DATABASE_URL has no host. Check it was pasted in full."
+    except ValueError as exc:
+        return f"DATABASE_URL could not be parsed: {exc}"
+
+    return None
 
 
 class Settings(BaseSettings):

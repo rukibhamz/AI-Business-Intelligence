@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import ConfigurationError, settings
+from app.config import ConfigurationError, describe_database_url_problem, settings
 from app.database import async_session, init_db
 from app.routes import (
     auth,
@@ -36,6 +36,14 @@ async def lifespan(app: FastAPI):
             f"{len(problems)} unsafe production setting(s):\n  - "
             + "\n  - ".join(problems)
         )
+
+    # A malformed connection string otherwise surfaces as a ValueError from
+    # inside urllib saying a hostname is not an IP address — which is true, and
+    # tells the operator nothing about the placeholder they forgot to replace.
+    database_problem = describe_database_url_problem(settings.database_url)
+    if database_problem:
+        logger.error("Database configuration: %s", database_problem)
+        raise ConfigurationError(database_problem)
 
     Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
     await init_db()
