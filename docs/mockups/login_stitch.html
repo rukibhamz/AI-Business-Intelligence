@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Login - Cognitive Logic</title>
+<!-- Google Fonts -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700&amp;family=Inter:wght@400;500;600&amp;family=Geist:wght@500;600&amp;display=swap" rel="stylesheet"/>
+<!-- Material Symbols -->
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Theme Configuration -->
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "on-surface": "#191c1d",
+                        "surface-container": "#edeeef",
+                        "primary-container": "#3e52d5",
+                        "secondary-container": "#6063ee",
+                        "secondary": "#4648d4",
+                        "on-primary-fixed": "#000d60",
+                        "on-secondary-fixed": "#07006c",
+                        "on-error-container": "#93000a",
+                        "on-error": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "outline": "#757686",
+                        "tertiary-fixed-dim": "#ffb694",
+                        "surface-tint": "#3b4fd2",
+                        "on-secondary-fixed-variant": "#2f2ebe",
+                        "primary-fixed": "#dfe0ff",
+                        "surface-container-highest": "#e1e3e4",
+                        "background": "#f8f9fa",
+                        "on-surface-variant": "#454654",
+                        "on-primary-container": "#d7daff",
+                        "error": "#ba1a1a",
+                        "on-tertiary-fixed": "#351000",
+                        "tertiary": "#7e3100",
+                        "on-background": "#191c1d",
+                        "on-tertiary-fixed-variant": "#7a2f00",
+                        "outline-variant": "#c5c5d7",
+                        "primary": "#2036bd",
+                        "on-tertiary-container": "#ffd3bf",
+                        "surface-dim": "#d9dadb",
+                        "inverse-primary": "#bbc3ff",
+                        "tertiary-container": "#a44200",
+                        "surface": "#f8f9fa",
+                        "secondary-fixed": "#e1e0ff",
+                        "primary-fixed-dim": "#bbc3ff",
+                        "surface-container-high": "#e7e8e9",
+                        "on-primary-fixed-variant": "#1d34ba",
+                        "surface-container-low": "#f3f4f5",
+                        "tertiary-fixed": "#ffdbcc",
+                        "on-secondary": "#ffffff",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary": "#ffffff",
+                        "surface-variant": "#e1e3e4",
+                        "on-secondary-container": "#fffbff",
+                        "secondary-fixed-dim": "#c0c1ff",
+                        "inverse-on-surface": "#f0f1f2",
+                        "surface-bright": "#f8f9fa",
+                        "inverse-surface": "#2e3132",
+                        "on-primary": "#ffffff"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    spacing: {
+                        "container-max": "1440px",
+                        "gutter": "24px",
+                        "xs": "4px",
+                        "lg": "24px",
+                        "md": "16px",
+                        "xl": "40px",
+                        "base": "4px",
+                        "sm": "8px"
+                    },
+                    fontFamily: {
+                        "body-sm": ["Inter"],
+                        "metric-lg": ["Hanken Grotesk"],
+                        "metric-md": ["Hanken Grotesk"],
+                        "mono-data": ["Geist"],
+                        "label-caps": ["Geist"],
+                        "headline-sm": ["Hanken Grotesk"],
+                        "body-md": ["Inter"]
+                    },
+                    fontSize: {
+                        "body-sm": ["14px", { "lineHeight": "20px", "fontWeight": "400" }],
+                        "metric-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "metric-md": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "mono-data": ["13px", { "lineHeight": "18px", "fontWeight": "500" }],
+                        "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                        "headline-sm": ["20px", { "lineHeight": "28px", "fontWeight": "600" }],
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background font-body-md text-body-md h-screen w-screen overflow-hidden flex">
+<!-- Left Side: Login Form -->
+<div class="w-full lg:w-1/2 h-full flex flex-col justify-center items-center p-lg relative z-10 bg-surface">
+<div class="w-full max-w-md flex flex-col gap-xl">
+<!-- Header -->
+<div class="flex flex-col gap-md text-center lg:text-left">
+<div class="flex items-center justify-center lg:justify-start gap-sm mb-4">
+<div class="w-8 h-8 rounded-DEFAULT bg-primary flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary text-xl" data-icon="auto_awesome" style="font-variation-settings: 'FILL' 1;">auto_awesome</span>
+</div>
+<h1 class="font-metric-md text-metric-md text-primary tracking-tight">Cognitive Logic</h1>
+</div>
+<div>
+<h2 class="font-metric-md text-metric-md text-on-surface mb-2">Welcome back</h2>
+<p class="font-body-md text-body-md text-on-surface-variant">Sign in to continue to your dashboard.</p>
+</div>
+</div>
+<!-- Form -->
+<form class="flex flex-col gap-lg">
+<div class="flex flex-col gap-xs">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase" for="email">Email Address</label>
+<input class="w-full px-md py-3 rounded-lg border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all font-body-md text-body-md text-on-surface placeholder-outline" id="email" name="email" placeholder="name@company.com" required="" type="email"/>
+</div>
+<div class="flex flex-col gap-xs">
+<label class="font-label-caps text-label-caps text-on-surface-variant uppercase" for="password">Password</label>
+<div class="relative">
+<input class="w-full px-md py-3 rounded-lg border border-outline-variant bg-surface focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all font-body-md text-body-md text-on-surface placeholder-outline pr-12" id="password" name="password" placeholder="••••••••" required="" type="password"/>
+<button class="absolute right-3 top-1/2 transform -translate-y-1/2 text-outline hover:text-primary transition-colors focus:outline-none" type="button">
+<span class="material-symbols-outlined text-[20px]" data-icon="visibility">visibility</span>
+</button>
+</div>
+</div>
+<div class="flex items-center justify-between mt-sm">
+<div class="flex items-center gap-sm">
+<input class="w-4 h-4 rounded-DEFAULT border-outline-variant text-primary focus:ring-primary" id="remember" name="remember" type="checkbox"/>
+<label class="font-body-sm text-body-sm text-on-surface-variant" for="remember">Remember me</label>
+</div>
+<a class="font-body-sm text-body-sm text-primary hover:text-secondary font-medium transition-colors" href="#">Forgot Password?</a>
+</div>
+<button class="w-full bg-primary hover:bg-secondary text-on-primary font-headline-sm text-headline-sm py-3 rounded-lg mt-md transition-all active:scale-[0.98] shadow-sm flex items-center justify-center gap-sm group" type="submit">
+                    Sign In
+                    <span class="material-symbols-outlined text-[20px] group-hover:translate-x-1 transition-transform" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</form>
+<!-- Footer -->
+<div class="text-center mt-xl">
+<p class="font-body-sm text-body-sm text-on-surface-variant">
+                    Don't have an account? <a class="text-primary hover:text-secondary font-medium transition-colors" href="#">Request Access</a>
+</p>
+</div>
+<div class="text-center mt-auto pt-lg">
+<p class="font-mono-data text-mono-data text-outline">v2.4.1 (Enterprise)</p>
+</div>
+</div>
+</div>
+<!-- Right Side: Visual Teaser -->
+<div class="hidden lg:flex w-1/2 h-full bg-surface-container relative overflow-hidden flex-col items-center justify-center p-xl">
+<!-- Background Pattern/Gradient -->
+<div class="absolute inset-0 bg-gradient-to-br from-primary-container/20 to-surface-container opacity-50 z-0"></div>
+<div class="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-primary/5 via-transparent to-transparent z-0"></div>
+<!-- Abstract Data Representation -->
+<div class="relative z-10 w-full max-w-2xl aspect-square flex items-center justify-center">
+<div class="w-full h-full rounded-2xl bg-surface border border-outline-variant shadow-[0_8px_30px_rgb(0,0,0,0.04)] overflow-hidden flex flex-col relative group">
+<!-- Mock UI Header -->
+<div class="h-12 border-b border-outline-variant flex items-center px-lg bg-surface/50 backdrop-blur-sm gap-sm">
+<div class="w-3 h-3 rounded-full bg-error-container"></div>
+<div class="w-3 h-3 rounded-full bg-surface-variant"></div>
+<div class="w-3 h-3 rounded-full bg-surface-variant"></div>
+<div class="ml-auto bg-surface-container px-sm py-xs rounded-DEFAULT font-mono-data text-mono-data text-on-surface-variant text-[10px]">Model: GPT-4-Turbo</div>
+</div>
+<!-- Mock UI Content -->
+<div class="flex-1 p-lg relative overflow-hidden bg-background">
+<!-- Placeholder Image for Abstract Data Viz -->
+<img class="absolute inset-0 w-full h-full object-cover opacity-80 mix-blend-multiply filter grayscale-[20%] sepia-[10%] hue-rotate-190 transition-transform duration-[10s] group-hover:scale-105 ease-in-out" data-alt="A highly sophisticated, abstract data visualization dashboard showing interconnected neural networks and predictive analytics graphs. The color palette features deep cobalt indigo against a pristine white background, representing professional, high-end B2B SaaS aesthetics. The lighting is crisp, even, and modern, highlighting the clarity and precision of the data nodes. Subtle glowing effects on the data points emphasize a sense of advanced AI intelligence." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCCWLRpTZGz2NypKF6dzwmwJYPP8iTpyvyXkKWJvgq_Lt1GtErOSWBDBqH5AsL-9Js2l0KQ9gs1czscV91EW2scQiqSWDLBDItH6KwO5iyQDMfcEB1pqg-Xe4xHxBOoyyjJSoD0Q8h3EJBPxx0D9wyIlNtV9TICX50VY1rBXZ4FZRKl4Xi4AESFEBmcF7uOg0Jx5LRl9LzrHClAeJVWyKq7l74vzH_H-wgM5NAwcMM3ZrorQfrvqnlC"/>
+<!-- Overlay UI Elements -->
+<div class="absolute bottom-lg right-lg left-lg bg-surface/90 backdrop-blur-md border border-outline-variant rounded-xl p-md shadow-[0_4px_12px_rgba(0,0,0,0.05)] transform translate-y-4 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-500">
+<div class="flex items-center gap-md">
+<div class="w-10 h-10 rounded-lg bg-primary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-primary text-xl" data-icon="insights" style="font-variation-settings: 'FILL' 1;">insights</span>
+</div>
+<div>
+<h4 class="font-headline-sm text-headline-sm text-on-surface text-[16px] leading-tight mb-1">Predictive Analysis Complete</h4>
+<p class="font-body-sm text-body-sm text-on-surface-variant text-[13px]">Identified 3 key optimization vectors in Q3 data stream.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="relative z-10 mt-xl text-center max-w-md">
+<h3 class="font-metric-md text-metric-md text-on-surface mb-2 text-[24px]">Intelligence, Applied.</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Transform your complex data streams into actionable executive insights with our proprietary logic engine.</p>
+</div>
+</div>
+</body></html>

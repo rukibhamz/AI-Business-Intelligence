@@ -1,0 +1,334 @@
+.settings-page {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding-bottom: 48px;
+}
+
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-card {
+  background: var(--cl-surface-container-lowest);
+  border: 1px solid var(--cl-outline-variant);
+  border-radius: var(--cl-radius);
+  padding: 40px;
+  box-shadow: var(--cl-shadow-level-2);
+}
+
+.settings-card-head {
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--cl-surface-variant);
+}
+
+.settings-card-head h2 {
+  margin: 0;
+  font-family: var(--cl-font-metric);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--cl-on-surface);
+}
+
+.settings-card-head p {
+  margin: 4px 0 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--cl-on-surface-variant);
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.settings-label {
+  font-family: var(--cl-font-label);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--cl-on-surface-variant);
+}
+
+.settings-field input,
+.settings-select-wrap select {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--cl-outline-variant);
+  border-radius: var(--cl-radius);
+  background: var(--cl-surface-container-lowest);
+  color: var(--cl-on-surface);
+  font-family: var(--cl-font-body);
+  font-size: 16px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.settings-field input:focus,
+.settings-select-wrap select:focus {
+  border-color: var(--cl-accent);
+  box-shadow: var(--cl-ring-active);
+}
+
+.settings-mono {
+  font-family: var(--cl-font-label) !important;
+  font-size: 13px !important;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.settings-hint {
+  font-size: 12px;
+  color: var(--cl-outline);
+}
+
+.settings-select-wrap {
+  position: relative;
+}
+
+.settings-select-wrap select {
+  appearance: none;
+  padding-right: 36px;
+}
+
+.settings-select-wrap .material-symbols-outlined {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--cl-outline);
+  pointer-events: none;
+  font-size: 20px;
+}
+
+.settings-logo-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.settings-logo-preview {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--cl-radius);
+  border: 1px solid var(--cl-outline-variant);
+  background: var(--cl-surface-container-low);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  color: var(--cl-outline);
+}
+
+.settings-logo-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.settings-logo-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.settings-file-btn {
+  display: inline-flex;
+  padding: 8px 14px;
+  border: 1px solid var(--cl-outline-variant);
+  border-radius: var(--cl-radius);
+  background: var(--cl-surface-container-lowest);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.settings-file-btn:hover {
+  background: var(--cl-surface-container-low);
+}
+
+.settings-schemes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.settings-scheme {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--cl-outline-variant);
+  border-radius: var(--cl-radius);
+  background: var(--cl-surface-container-lowest);
+  color: var(--cl-on-surface);
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.settings-scheme.is-active {
+  border-color: var(--cl-accent);
+  box-shadow: var(--cl-ring-active);
+}
+
+.settings-swatches {
+  display: flex;
+  gap: 3px;
+}
+
+.settings-swatches i {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  display: block;
+}
+
+.settings-key-row {
+  display: flex;
+  gap: 16px;
+  align-items: stretch;
+}
+
+.settings-key-input {
+  position: relative;
+  flex: 1;
+}
+
+.settings-key-input input {
+  width: 100%;
+  padding: 8px 40px 8px 12px;
+  border: 1px solid var(--cl-outline-variant);
+  border-radius: var(--cl-radius);
+  background: var(--cl-surface-container-lowest);
+  color: var(--cl-on-surface);
+}
+
+.settings-eye {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: var(--cl-outline);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 4px;
+}
+
+.settings-eye .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.settings-test-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid var(--cl-outline-variant);
+  border-radius: var(--cl-radius);
+  background: var(--cl-surface-container-lowest);
+  color: var(--cl-on-surface);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.settings-test-btn:hover:not(:disabled) {
+  background: var(--cl-surface-container-low);
+}
+
+.settings-test-btn .material-symbols-outlined {
+  font-size: 18px;
+}
+
+.settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 16px;
+  padding-top: 24px;
+  border-top: 1px solid var(--cl-surface-variant);
+}
+
+.settings-text-btn {
+  border: none;
+  background: transparent;
+  color: var(--cl-on-surface-variant);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 8px 12px;
+}
+
+.settings-text-btn:hover {
+  color: var(--cl-on-surface);
+}
+
+.settings-save {
+  padding: 8px 24px;
+  border: none;
+  border-radius: var(--cl-radius);
+  background: var(--cl-accent);
+  color: var(--cl-on-accent);
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--cl-shadow-level-1);
+}
+
+.settings-save:hover:not(:disabled) {
+  background: var(--cl-accent-hover);
+}
+
+.settings-save:disabled,
+.settings-test-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.settings-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--cl-radius);
+  background: var(--cl-error-container);
+  color: var(--cl-on-error-container);
+  font-size: 14px;
+}
+
+.settings-ok {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: var(--cl-radius);
+  background: var(--cl-success-bg);
+  color: var(--cl-success-fg);
+  font-size: 14px;
+}
+
+.settings-muted {
+  color: var(--cl-on-surface-variant);
+}
+
+@media (max-width: 640px) {
+  .settings-card {
+    padding: 24px 16px;
+  }
+
+  .settings-schemes,
+  .settings-key-row {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .settings-schemes {
+    display: flex;
+    flex-direction: column;
+  }
+}

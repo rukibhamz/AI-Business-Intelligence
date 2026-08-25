@@ -1,0 +1,21 @@
+.live-chart {
+  width: 100%;
+  min-height: 160px;
+}
+
+.live-chart .recharts-cartesian-axis-tick text {
+  fill: var(--cl-chart-axis);
+}
+
+.live-chart .recharts-legend-item-text {
+  color: var(--cl-on-surface-variant) !important;
+}
+
+.live-chart .recharts-tooltip-item {
+  color: var(--cl-on-surface) !important;
+}
+
+.live-chart .recharts-default-tooltip {
+  background: var(--cl-surface-container-lowest) !important;
+  border-color: var(--cl-border) !important;
+}

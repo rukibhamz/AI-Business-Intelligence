@@ -40,31 +40,36 @@ AI-Business-Intelligence/
 
 | Field | Value |
 |-------|-------|
-| **Last updated** | 2026-08-24 |
-| **Last agent/session** | Ingested Cognitive Logic design system |
-| **Active phase** | UI Design (parallel) + Phase 4 next for features |
-| **Phase status** | Design system ingested — awaiting Login mockup |
+| **Last updated** | 2026-08-25 |
+| **Last agent/session** | Full UI upgrade — Manrope, theming, live-data-only |
+| **Active phase** | Core product screens complete; Phase 6 next |
+| **Phase status** | All screens render live data; no placeholder content remains |
 | **Blockers** | None |
 
 ### 2.2 What Was Completed
 
-- [x] Phase 1 validated: health API, sources CRUD, frontend build
-- [x] Phase 2 validated: upload, MySQL, preview, frontend build
-- [x] Phase 3: JWT login (`POST /api/auth/login`), `/me`, bootstrap admin
-- [x] Phase 3: Protected source/query API routes (401 without token)
-- [x] Phase 3: `user_id` set on create for audit
-- [x] Phase 3: Frontend login gate + Bearer token + logout
-- [x] Design system **Cognitive Logic** ingested (`docs/DESIGN_SYSTEM.md`, `frontend/src/styles/tokens.css`)
+- [x] Phase 1–5 + Settings branding as previously documented
+- [x] Data Sources page from Stitch (upload zone, field mapping, dataset cards)
+- [x] Field mapping API (`PUT /sources/{id}/mapping`, recompute, canonical fields)
+- [x] **Live analytics engine** — `services/analytics.py` computes KPIs, charts,
+      and findings from real rows via the source connectors (stdlib only)
+- [x] **`GET /api/insights/overview`** and **`GET /api/insights/findings`**
+- [x] **UI upgrade** — Manrope + JetBrains Mono, rebuilt token system with a real
+      light/dark theme, scheme-driven accents, restructured sidebar (grouped nav,
+      collapse, mobile drawer), command palette (Ctrl/Cmd+K), notifications
+      popover, theme toggle, account menu, skeletons and empty states
+- [x] **All placeholder data removed** — Overview and Findings were hardcoded
+      demo content and now render only computed values
+- [x] **Bug fix:** deleting a data source that had been queried returned 500
+      (FK violation); dependent queries and dashboard widgets are now purged
 
 ### 2.3 What To Do Next
 
-1. **Review Login UI** at http://localhost:5173 (log out if already signed in)
-2. **Upload next screen mockup** (app shell / sidebar recommended)
-3. Feature work remains Phase 4+ — prefer mockup-driven UI while design track is active
+1. Review the app at http://localhost:5173 (upload a CSV with date/revenue/region
+   columns to see the full dashboard populate)
+2. Phase 6: Docker, Alembic, tests, CI when ready
 
-**Default credentials** (change via `ADMIN_*` env vars): `admin@local.dev` / `admin123`
-
-**Design reference:** [docs/DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md)
+**Default credentials:** `admin@local.dev` / `admin123`
 
 ### 2.4 Conventions for All Agents
 
@@ -160,35 +165,40 @@ See `.env.example`. Minimum for Phase 1:
 
 ---
 
-### Phase 4 — AI Query Engine ⬜ NOT STARTED
+### Phase 4 — AI Query Engine ✅ COMPLETE (functional)
 
 **Objective:** Natural language → SQL → results + explanation.
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 4.1 | Schema context builder for LLM | ⬜ | Inject table/column metadata into prompt |
-| 4.2 | NL → SQL generation service | ⬜ | OpenAI function calling or structured output |
-| 4.3 | SQL validation & sandbox execution | ⬜ | Read-only, timeout, row limits |
-| 4.4 | Query history & caching | ⬜ | `Query` model already defined |
-| 4.5 | Frontend chat/query interface | ⬜ | Message thread + result table/chart |
+| 4.1 | Schema context builder for LLM | ✅ Done | `services/schema_context.py` |
+| 4.2 | NL → SQL generation service | ✅ Done | OpenAI via httpx; heuristic fallback |
+| 4.3 | SQL validation & sandbox execution | ✅ Done | Read-only + LIMIT; CSV/XLSX→SQLite |
+| 4.4 | Query history & caching | ✅ Done | Persist + list; no result cache yet |
+| 4.5 | Frontend chat/query interface | ✅ Done | Ask AI panel (table; charts → Phase 5) |
 
-**Exit criteria:** Ask "top 10 customers by revenue" against a connected source, get a table back.
+**Exit criteria:** Ask "top 10 customers by revenue" against a connected source, get a table back. ✅
 
 ---
 
-### Phase 5 — Visualization & Dashboards ⬜ NOT STARTED
+### Phase 5 — Visualization & Dashboards ✅ COMPLETE (functional)
 
 **Objective:** Save and share visual insights.
 
 | # | Task | Status | Notes |
 |---|------|--------|-------|
-| 5.1 | Chart recommendation from result shape | ⬜ | bar, line, pie heuristics |
-| 5.2 | Chart rendering (Recharts) | ⬜ | Frontend components |
-| 5.3 | Dashboard CRUD API | ⬜ | `Dashboard` model exists |
-| 5.4 | Dashboard builder UI | ⬜ | Drag-and-drop widgets |
-| 5.5 | Export (PNG, CSV) | ⬜ | Download endpoints |
+| 5.0 | App shell + Overview UI | ✅ Done | Live KPIs/charts from `/api/insights/overview` |
+| 5.0b | Ask AI chat interface | ✅ Done | Stitch mockup; live `/queries/run` |
+| 5.1 | Chart recommendation from result shape | ✅ Done | `services/chart_recommend.py` |
+| 5.2 | Chart rendering (Recharts) | ✅ Done | bar / line / pie |
+| 5.3 | Dashboard CRUD API | ✅ Done | `/api/dashboards` + widgets |
+| 5.4 | Dashboard builder UI | ✅ Done | Findings page; pin from Ask AI (no DnD yet) |
+| 5.5 | Export (CSV) | ✅ Done | `GET /queries/{id}/export`; PNG deferred |
+| 5.6 | Live findings engine | ✅ Done | `services/analytics.py` + `/api/insights/findings` |
+| 5.7 | Theming (light/dark + colour schemes) | ✅ Done | `styles/tokens.css`, `lib/theme.ts` |
+| 5.8 | Command palette search | ✅ Done | `components/CommandPalette.tsx` (Ctrl/Cmd+K) |
 
-**Exit criteria:** Pin a chart to a dashboard, reload page, chart persists.
+**Exit criteria:** Pin a chart to a dashboard, reload page, chart persists. ✅
 
 ---
 
@@ -213,7 +223,8 @@ See `.env.example`. Minimum for Phase 1:
 
 | Date | Decision | Rationale |
 |------|----------|-----------|
-| 2026-08-24 | Cognitive Logic design system | Refined Minimalism; Cobalt Indigo; Hanken/Inter/Geist |
+| 2026-08-25 | Floating sidebar + Plus Jakarta | Match sidebar mockup; cooler geometric UI font |
+| 2026-08-24 | Cognitive Logic design system | Refined Minimalism; Cobalt Indigo; Hanken + Plus Jakarta |
 | 2026-08-24 | Single-business scope (not multi-tenant) | One org per deployment; shared data workspace |
 | 2026-08-24 | FastAPI + React monorepo | AI/ML ecosystem, async API, modern frontend DX |
 | 2026-08-24 | MySQL over PostgreSQL | User runs XAMPP locally |
@@ -226,6 +237,15 @@ See `.env.example`. Minimum for Phase 1:
 
 | Date | Agent/Human | Work Done |
 |------|-------------|-----------|
+| 2026-08-25 | Agent | Q&A History screen from Stitch; AI Insights → history, New Analysis → chat |
+| 2026-08-25 | Agent | Findings/Reports UI from Stitch; severity cards + color cleanup |
+| 2026-08-25 | Agent | Sidebar redesign (floating rail, collapse, tooltips) + Plus Jakarta Sans |
+| 2026-08-25 | Agent | Data Sources UI + field mapping from Stitch mockup |
+| 2026-08-25 | Agent | Settings: AI provider + branding (name/logo/colors) |
+| 2026-08-25 | Agent | Phase 5: Recharts, dashboard CRUD, pin, CSV export |
+| 2026-08-25 | Agent | Ask AI chat UI from Stitch; Cognitive Logic shell brand |
+| 2026-08-24 | Agent | Overview dashboard + app shell from Stitch mockup |
+| 2026-08-24 | Agent | Phase 4 AI Query Engine: run API, sandbox, Ask AI UI |
 | 2026-08-24 | Agent | Ingested Cognitive Logic design system (tokens + docs) |
 | 2026-08-24 | Agent | Phase 2 validated; Phase 3 JWT auth implemented |
 | 2026-08-24 | Agent | Phase 1 validated; Phase 2 data layer implemented |

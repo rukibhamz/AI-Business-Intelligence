@@ -6,7 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import async_session, init_db
-from app.routes import auth, queries, sources
+from app.routes import (
+    auth,
+    dashboards,
+    insights,
+    queries,
+    settings as settings_routes,
+    sources,
+)
 from app.services.auth import ensure_bootstrap_admin
 
 
@@ -37,6 +44,9 @@ app.add_middleware(
 app.include_router(auth.router, prefix="/api")
 app.include_router(sources.router, prefix="/api")
 app.include_router(queries.router, prefix="/api")
+app.include_router(dashboards.router, prefix="/api")
+app.include_router(insights.router, prefix="/api")
+app.include_router(settings_routes.router, prefix="/api")
 
 
 @app.get("/api/health")

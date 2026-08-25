@@ -2,6 +2,7 @@
 
 :root {
   font-family: var(--cl-font-body);
+  font-size: 16px;
   line-height: 1.5;
   color: var(--cl-on-surface-variant);
   background: var(--cl-canvas);
@@ -11,7 +12,9 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
@@ -20,16 +23,68 @@ body {
   min-height: 100svh;
   background: var(--cl-canvas);
   color: var(--cl-on-surface-variant);
+  transition: background var(--cl-duration) var(--cl-ease);
 }
 
 #root {
   min-height: 100svh;
 }
 
-.app h1,
-.app h2,
-.app h3 {
-  font-family: var(--cl-font-metric);
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--cl-font-body);
   color: var(--cl-on-surface);
-  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--cl-font-mono);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--cl-accent) 24%, transparent);
+  color: var(--cl-on-surface);
+}
+
+/* Scrollbars that match the theme rather than the OS default. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cl-outline-variant) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--cl-outline-variant);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--cl-radius-full);
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--cl-outline);
+  background-clip: content-box;
+}
+
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}
+
+.material-symbols-outlined.filled {
+  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
 }

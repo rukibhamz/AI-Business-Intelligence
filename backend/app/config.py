@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     admin_full_name: str = "Admin"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    openai_base_url: str = "https://api.openai.com/v1"
     cors_origins: str = "http://localhost:5173"
     app_env: str = "development"
     upload_dir: str = "uploads"

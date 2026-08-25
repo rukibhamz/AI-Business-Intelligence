@@ -1,8 +1,16 @@
 import { useState } from 'react'
-import { api, setSession, type User } from '../api/client'
+import { api, setSession, type AppSettings, type User } from '../api/client'
 import './LoginPage.css'
 
-export function LoginPage({ onSuccess }: { onSuccess: (user: User) => void }) {
+export function LoginPage({
+  onSuccess,
+  branding,
+}: {
+  onSuccess: (user: User) => void
+  branding?: AppSettings | null
+}) {
+  const platformName = branding?.platform_name || 'Cognitive Logic'
+  const tagline = branding?.platform_tagline || 'Business Intelligence'
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -37,19 +45,23 @@ export function LoginPage({ onSuccess }: { onSuccess: (user: User) => void }) {
   }
 
   return (
-    <div className="cl-login-root" data-theme="light">
+    <div className="cl-login-root">
       <div className="cl-login-left">
         <div className="cl-login-stack">
           <div className="cl-login-intro">
             <div className="cl-login-brand">
               <div className="cl-login-mark" aria-hidden="true">
-                <span className="material-symbols-outlined filled">auto_awesome</span>
+                {branding?.logo_url ? (
+                  <img src={branding.logo_url} alt="" />
+                ) : (
+                  <span className="material-symbols-outlined filled" aria-hidden="true">insights</span>
+                )}
               </div>
-              <p className="cl-login-brand-title">Cognitive Logic</p>
+              <p className="cl-login-brand-title">{platformName}</p>
             </div>
             <div>
               <p className="cl-login-welcome">Welcome back</p>
-              <p className="cl-login-subtitle">Sign in to continue to your dashboard.</p>
+              <p className="cl-login-subtitle">Sign in to continue to {platformName}.</p>
             </div>
           </div>
 
@@ -89,7 +101,7 @@ export function LoginPage({ onSuccess }: { onSuccess: (user: User) => void }) {
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                   onClick={() => setShowPassword((v) => !v)}
                 >
-                  <span className="material-symbols-outlined">
+                  <span className="material-symbols-outlined" aria-hidden="true">
                     {showPassword ? 'visibility_off' : 'visibility'}
                   </span>
                 </button>
@@ -107,33 +119,25 @@ export function LoginPage({ onSuccess }: { onSuccess: (user: User) => void }) {
                 />
                 <label htmlFor="cl-remember">Remember me</label>
               </div>
-              <a className="cl-text-link" href="#" onClick={(e) => e.preventDefault()}>
-                Forgot Password?
-              </a>
+              <span className="cl-login-hint">
+                Password resets are handled by your administrator.
+              </span>
             </div>
 
             <button type="submit" className="cl-signin-btn" disabled={busy}>
               {busy ? 'Signing in…' : (
                 <>
                   Sign In
-                  <span className="material-symbols-outlined arrow">arrow_forward</span>
+                  <span className="material-symbols-outlined arrow" aria-hidden="true">arrow_forward</span>
                 </>
               )}
             </button>
           </form>
 
           <div className="cl-login-footer">
-            <p>
-              Don&apos;t have an account?{' '}
-              <a className="cl-text-link" href="#" onClick={(e) => e.preventDefault()}>
-                Request Access
-              </a>
-            </p>
+            <p>Accounts are provisioned by your administrator.</p>
           </div>
 
-          <div className="cl-login-version">
-            <p>v2.4.1 (Enterprise)</p>
-          </div>
         </div>
       </div>
 
@@ -141,43 +145,27 @@ export function LoginPage({ onSuccess }: { onSuccess: (user: User) => void }) {
         <div className="cl-login-right-grad" />
         <div className="cl-login-right-radial" />
 
-        <div className="cl-teaser">
-          <div className="cl-teaser-card">
-            <div className="cl-teaser-chrome">
-              <span className="traffic red" />
-              <span className="traffic yellow" />
-              <span className="traffic green" />
-              <div className="cl-model-chip">Model: GPT-4-Turbo</div>
-            </div>
-            <div className="cl-teaser-body">
-              <img
-                className="cl-teaser-img"
-                src="/brand/login-dashboard.png"
-                alt=""
-              />
-              <div className="cl-teaser-overlay">
-                <div className="cl-teaser-overlay-inner">
-                  <div className="cl-teaser-icon">
-                    <span className="material-symbols-outlined filled">insights</span>
-                  </div>
-                  <div>
-                    <p className="cl-teaser-overlay-title">Predictive Analysis Complete</p>
-                    <p className="cl-teaser-overlay-body">
-                      Identified 3 key optimization vectors in Q3 data stream.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
         <div className="cl-teaser-copy">
-          <p className="cl-teaser-headline">Intelligence, Applied.</p>
+          <p className="cl-teaser-eyebrow">{tagline}</p>
+          <p className="cl-teaser-headline">Ask your data a question.</p>
           <p className="cl-teaser-desc">
-            Transform your complex data streams into actionable executive insights with our
-            proprietary logic engine.
+            {platformName} turns plain-English questions into SQL, runs it against the sources
+            you connect, and reports only what your own data says.
           </p>
+          <ul className="cl-teaser-points">
+            <li>
+              <span className="material-symbols-outlined" aria-hidden="true">database</span>
+              Connect CSV, Excel, or MySQL
+            </li>
+            <li>
+              <span className="material-symbols-outlined" aria-hidden="true">query_stats</span>
+              KPIs and charts computed from live rows
+            </li>
+            <li>
+              <span className="material-symbols-outlined" aria-hidden="true">flag</span>
+              Findings surfaced from real anomalies
+            </li>
+          </ul>
         </div>
       </aside>
     </div>

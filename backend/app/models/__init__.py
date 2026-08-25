@@ -69,3 +69,15 @@ class Dashboard(Base):
     )
 
     owner: Mapped["User | None"] = relationship(back_populates="dashboards")
+
+
+class AppConfig(Base):
+    """Singleton row (id=1) for runtime AI + branding settings."""
+
+    __tablename__ = "app_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    data_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )

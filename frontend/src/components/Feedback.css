@@ -1,0 +1,191 @@
+/* ------------------------------------------------------------ empty state */
+.cl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--cl-space-sm);
+  padding: 48px var(--cl-space-lg);
+  text-align: center;
+  background: var(--cl-surface-container-lowest);
+  border: 1px dashed var(--cl-outline-variant);
+  border-radius: var(--cl-radius-lg);
+}
+
+.cl-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: var(--cl-space-xs);
+  border-radius: var(--cl-radius-full);
+  background: var(--cl-surface-container);
+  color: var(--cl-on-surface-muted);
+}
+
+.cl-empty--positive .cl-empty-icon {
+  background: var(--cl-success-bg);
+  color: var(--cl-success-fg);
+}
+
+.cl-empty-icon .material-symbols-outlined {
+  font-size: 26px;
+}
+
+.cl-empty-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--cl-on-surface);
+}
+
+.cl-empty-body {
+  max-width: 46ch;
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 20px;
+  color: var(--cl-on-surface-variant);
+}
+
+.cl-empty-body p {
+  margin: 0;
+}
+
+.cl-empty-action {
+  margin-top: var(--cl-space-sm);
+}
+
+/* --------------------------------------------------------------- skeleton */
+.cl-skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    var(--cl-surface-container) 25%,
+    var(--cl-surface-container-high) 37%,
+    var(--cl-surface-container) 63%
+  );
+  background-size: 400% 100%;
+  animation: cl-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes cl-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cl-skeleton {
+    animation: none;
+  }
+}
+
+/* --------------------------------------------------------- inline message */
+.cl-inline {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid transparent;
+  border-radius: var(--cl-radius-md);
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
+.cl-inline .material-symbols-outlined {
+  flex-shrink: 0;
+  font-size: 19px;
+  margin-top: 1px;
+}
+
+.cl-inline-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.cl-inline-body p {
+  margin: 0;
+}
+
+.cl-inline--error {
+  background: var(--cl-error-container);
+  border-color: color-mix(in srgb, var(--cl-error) 30%, transparent);
+  color: var(--cl-on-error-container);
+}
+
+.cl-inline--warning {
+  background: var(--cl-warning-bg);
+  border-color: color-mix(in srgb, var(--cl-warning) 30%, transparent);
+  color: var(--cl-warning-fg);
+}
+
+.cl-inline--success {
+  background: var(--cl-success-bg);
+  border-color: color-mix(in srgb, var(--cl-success) 30%, transparent);
+  color: var(--cl-success-fg);
+}
+
+.cl-inline--info {
+  background: var(--cl-info-bg);
+  border-color: color-mix(in srgb, var(--cl-info) 28%, transparent);
+  color: var(--cl-info-fg);
+}
+
+.cl-inline-close {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--cl-radius-sm);
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+.cl-inline-close:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.cl-inline-close .material-symbols-outlined {
+  font-size: 16px;
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------- spinner */
+.cl-spinner-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--cl-on-surface-variant);
+  font-size: 13.5px;
+}
+
+.cl-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--cl-outline-variant);
+  border-top-color: var(--cl-accent);
+  border-radius: var(--cl-radius-full);
+  animation: cl-spin 0.7s linear infinite;
+}
+
+@keyframes cl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cl-spinner {
+    animation-duration: 2s;
+  }
+}

@@ -1,0 +1,14 @@
+.result-chart {
+  width: 100%;
+  min-height: 160px;
+  margin: 8px 0 12px;
+}
+
+.result-chart .recharts-legend-item-text {
+  color: var(--cl-on-surface-variant) !important;
+}
+
+.result-chart .recharts-tooltip-item,
+.result-chart .recharts-tooltip-label {
+  color: var(--cl-on-surface) !important;
+}

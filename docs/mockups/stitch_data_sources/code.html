@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Datasets - Intelligence Hub</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Hanken+Grotesk:wght@400;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-primary-fixed": "#000d60",
+                      "outline": "#757686",
+                      "on-tertiary-fixed-variant": "#7a2f00",
+                      "on-secondary-fixed": "#07006c",
+                      "inverse-primary": "#bbc3ff",
+                      "surface-container-highest": "#e1e3e4",
+                      "secondary-fixed": "#e1e0ff",
+                      "on-background": "#191c1d",
+                      "error": "#ba1a1a",
+                      "on-tertiary-container": "#ffd3bf",
+                      "on-error": "#ffffff",
+                      "error-container": "#ffdad6",
+                      "surface-tint": "#3b4fd2",
+                      "tertiary-fixed-dim": "#ffb694",
+                      "on-surface-variant": "#454654",
+                      "tertiary-fixed": "#ffdbcc",
+                      "surface": "#f8f9fa",
+                      "background": "#f8f9fa",
+                      "on-error-container": "#93000a",
+                      "primary-fixed-dim": "#bbc3ff",
+                      "secondary-container": "#6063ee",
+                      "outline-variant": "#c5c5d7",
+                      "primary-container": "#3e52d5",
+                      "on-tertiary": "#ffffff",
+                      "tertiary": "#7e3100",
+                      "on-surface": "#191c1d",
+                      "inverse-on-surface": "#f0f1f2",
+                      "on-secondary-container": "#fffbff",
+                      "surface-container-high": "#e7e8e9",
+                      "secondary": "#4648d4",
+                      "surface-container-low": "#f3f4f5",
+                      "tertiary-container": "#a44200",
+                      "on-primary": "#ffffff",
+                      "surface-bright": "#f8f9fa",
+                      "surface-container-lowest": "#ffffff",
+                      "inverse-surface": "#2e3132",
+                      "primary-fixed": "#dfe0ff",
+                      "on-primary-fixed-variant": "#1d34ba",
+                      "on-secondary-fixed-variant": "#2f2ebe",
+                      "surface-container": "#edeeef",
+                      "surface-variant": "#e1e3e4",
+                      "secondary-fixed-dim": "#c0c1ff",
+                      "on-tertiary-fixed": "#351000",
+                      "on-primary-container": "#d7daff",
+                      "surface-dim": "#d9dadb",
+                      "primary": "#2036bd",
+                      "on-secondary": "#ffffff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "gutter": "24px",
+                      "xl": "40px",
+                      "xs": "4px",
+                      "container-max": "1440px",
+                      "sm": "8px",
+                      "base": "4px",
+                      "lg": "24px",
+                      "md": "16px"
+              },
+              "fontFamily": {
+                      "body-sm": [
+                              "Inter"
+                      ],
+                      "metric-md": [
+                              "Hanken Grotesk"
+                      ],
+                      "mono-data": [
+                              "Geist"
+                      ],
+                      "body-md": [
+                              "Inter"
+                      ],
+                      "metric-lg": [
+                              "Hanken Grotesk"
+                      ],
+                      "headline-sm": [
+                              "Hanken Grotesk"
+                      ],
+                      "label-caps": [
+                              "Geist"
+                      ]
+              },
+              "fontSize": {
+                      "body-sm": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "metric-md": [
+                              "32px",
+                              {
+                                      "lineHeight": "40px",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "mono-data": [
+                              "13px",
+                              {
+                                      "lineHeight": "18px",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "body-md": [
+                              "16px",
+                              {
+                                      "lineHeight": "24px",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "metric-lg": [
+                              "48px",
+                              {
+                                      "lineHeight": "56px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "headline-sm": [
+                              "20px",
+                              {
+                                      "lineHeight": "28px",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "label-caps": [
+                              "12px",
+                              {
+                                      "lineHeight": "16px",
+                                      "letterSpacing": "0.05em",
+                                      "fontWeight": "600"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen">
+<!-- TopNavBar -->
+<nav class="fixed top-0 right-0 w-[calc(100%-240px)] z-50 bg-surface border-b border-outline-variant flex justify-between items-center h-16 px-lg ml-[240px]">
+<div class="flex items-center gap-sm">
+<span class="font-headline-sm text-headline-sm font-bold text-primary">Intelligence Hub</span>
+</div>
+<div class="flex items-center gap-md">
+<!-- Search Bar -->
+<div class="relative hidden lg:block w-64 focus-within:ring-2 focus-within:ring-primary rounded-DEFAULT">
+<span class="material-symbols-outlined absolute left-sm top-1/2 -translate-y-1/2 text-outline-variant" data-icon="search">search</span>
+<input class="w-full bg-surface-container-low border border-outline-variant rounded-DEFAULT py-xs pl-xl pr-sm font-body-sm text-body-sm text-on-surface-variant focus:outline-none focus:border-primary placeholder-outline-variant" placeholder="Search..." type="text"/>
+</div>
+<button class="bg-primary text-on-primary font-body-sm text-body-sm px-md py-sm rounded-lg hover:bg-primary-container transition-colors duration-200">Ask AI</button>
+<button class="text-on-surface-variant hover:bg-surface-container-low transition-all p-sm rounded-full flex items-center justify-center">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="text-on-surface-variant hover:bg-surface-container-low transition-all p-sm rounded-full flex items-center justify-center">
+<span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
+</button>
+<div class="w-8 h-8 rounded-full bg-surface-container-high overflow-hidden border border-outline-variant">
+<img alt="Manager Avatar" class="w-full h-full object-cover" data-alt="A professional headshot of a business manager, smiling subtly, wearing a smart casual outfit in a well-lit office setting. The lighting is soft and natural, creating a clean, modern aesthetic that fits a high-end corporate application." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDb2tSLV3q55IArb1hrSVCfa2LKpBT_wPQyFga1md2M6VxREZ3mNfnxWLJfVOyCtwyFNZ5QffgxD9Skcp3W1xiHi3I1B_jaZVU57zOUCsB7ilWyRsGwnI7XfWB3uwCTNTQx_RMEQuyUUGPtepJLjxQX408hsMMk952JmkBzUfNwD_mD0WxZ0uAdeQi8US15ZZ_ZZR5j5pMBWDsW1c9L4JAZ9tnQfyXZtp3_BsrUh-GJ0HRo0KGiaiAH"/>
+</div>
+</div>
+</nav>
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 h-full w-[240px] bg-surface-container-lowest border-r border-outline-variant flex flex-col h-full py-lg px-md z-40">
+<!-- Header -->
+<div class="flex items-center gap-md mb-xl px-sm">
+<div class="w-10 h-10 rounded-full bg-surface-container-high overflow-hidden border border-outline-variant flex-shrink-0">
+<img alt="Business Manager Profile" class="w-full h-full object-cover" data-alt="A stylized, modern geometric avatar representing an AI assistant or business entity. The design uses crisp vector shapes in shades of deep indigo and soft white, set against a light background, exuding a high-tech, professional vibe." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAf5Y-0848i1JY8qzWKclAxEeoX48H_MV5BIhpg9U0CqxI2ZycIZ-xPWJCTPa82CGQrFe45KSfGivN5Ht7pupnc-MoZfOplnBzJnIBpQC0vDJDz0Nitf60rjeBV_NpyDLwsUT9h24gy4_Ov9q_BKk4oDmjXiMYxcw6-LLkso6a67pP7pm78Gs2_xjpWjHdqCtV4aelVB2VBroWdkMuCclXblNYv_KCIroTJIOQ4u3EZqRoLzCw2uNvH"/>
+</div>
+<div class="flex flex-col">
+<span class="font-headline-sm text-headline-sm font-bold text-primary">BI Assistant</span>
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Enterprise Tier</span>
+</div>
+</div>
+<!-- Navigation Tabs -->
+<nav class="flex-1 flex flex-col gap-xs">
+<a class="flex items-center gap-sm px-sm py-sm rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:bg-surface-container transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-body-md text-body-md">Dashboard</span>
+</a>
+<a class="flex items-center gap-sm px-sm py-sm rounded-lg bg-surface-container-high text-primary border-l-4 border-primary hover:bg-surface-container transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined" data-icon="database">database</span>
+<span class="font-body-md text-body-md font-bold">Data Sources</span>
+</a>
+<a class="flex items-center gap-sm px-sm py-sm rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:bg-surface-container transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+<span class="font-body-md text-body-md">Reports</span>
+</a>
+<a class="flex items-center gap-sm px-sm py-sm rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:bg-surface-container transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined" data-icon="psychology">psychology</span>
+<span class="font-body-md text-body-md">AI Insights</span>
+</a>
+<a class="flex items-center gap-sm px-sm py-sm rounded-lg text-on-surface-variant hover:bg-surface-container-low hover:bg-surface-container transition-colors duration-200 cursor-pointer active:scale-95" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-body-md text-body-md">Settings</span>
+</a>
+</nav>
+<!-- CTA -->
+<div class="mt-auto px-sm">
+<button class="w-full bg-primary text-on-primary font-body-sm text-body-sm py-sm rounded-lg hover:bg-primary-container transition-colors duration-200 flex items-center justify-center gap-xs">
+<span class="material-symbols-outlined" data-icon="add">add</span>
+                New Analysis
+            </button>
+</div>
+</aside>
+<!-- Main Content -->
+<main class="ml-[240px] mt-16 p-lg max-w-container-max mx-auto min-h-[calc(100vh-64px)] bg-background">
+<!-- Header Section -->
+<header class="mb-lg">
+<h1 class="font-headline-sm text-headline-sm font-bold text-on-background mb-xs">Data Sources</h1>
+<p class="font-body-sm text-body-sm text-on-surface-variant">Manage and map your business datasets for AI-driven analysis.</p>
+</header>
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-lg">
+<!-- Left Column: Upload & Mapping (Occupies 8 cols on large screens) -->
+<div class="lg:col-span-8 flex flex-col gap-lg">
+<!-- Upload Zone -->
+<section class="bg-surface-container-lowest border-2 border-dashed border-outline-variant rounded-lg p-xl flex flex-col items-center justify-center text-center hover:border-primary hover:bg-surface-container-low transition-colors duration-300 cursor-pointer group">
+<div class="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center mb-md group-hover:bg-primary-container group-hover:text-on-primary transition-colors duration-300">
+<span class="material-symbols-outlined text-outline-variant group-hover:text-on-primary" data-icon="cloud_upload" style="font-size: 32px;">cloud_upload</span>
+</div>
+<h3 class="font-headline-sm text-headline-sm font-bold text-on-background mb-sm">Upload a business dataset</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-xs">Sales, employees, inventory, deliveries, or marketing data</p>
+<p class="font-label-caps text-label-caps text-outline uppercase mt-sm">.csv or .xlsx supported</p>
+</section>
+<!-- Field Mapping Card (Simulated Active State) -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-lg p-lg shadow-[0_4px_12px_rgba(0,0,0,0.05)] relative overflow-hidden">
+<!-- Accent top border -->
+<div class="absolute top-0 left-0 w-full h-1 bg-primary"></div>
+<div class="flex justify-between items-center mb-md mt-sm">
+<h2 class="font-headline-sm text-headline-sm font-bold text-on-background">Confirm Field Mapping</h2>
+<span class="font-label-caps text-label-caps text-primary bg-primary-fixed px-sm py-xs rounded-full uppercase">Action Required</span>
+</div>
+<div class="overflow-x-auto border border-outline-variant rounded-DEFAULT mb-md">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="bg-surface-container-low border-b border-outline-variant">
+<th class="py-sm px-md font-label-caps text-label-caps text-on-surface-variant uppercase font-semibold">Source Column (CSV)</th>
+<th class="py-sm px-md font-label-caps text-label-caps text-on-surface-variant uppercase font-semibold w-1/2">Map to Canonical Field</th>
+</tr>
+</thead>
+<tbody class="font-mono-data text-mono-data text-on-surface">
+<tr class="border-b border-surface-variant hover:bg-surface-container-low transition-colors">
+<td class="py-sm px-md border-r border-surface-variant">txn_date</td>
+<td class="py-sm px-md">
+<select class="w-full bg-surface border border-outline-variant rounded-DEFAULT py-xs px-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary text-on-background font-body-sm text-body-sm">
+<option>Date</option>
+<option>Timestamp</option>
+<option>Ignore</option>
+</select>
+</td>
+</tr>
+<tr class="border-b border-surface-variant hover:bg-surface-container-low transition-colors bg-primary-fixed/20">
+<td class="py-sm px-md border-r border-surface-variant">gross_rev</td>
+<td class="py-sm px-md relative">
+<select class="w-full bg-surface border-2 border-primary rounded-DEFAULT py-xs px-sm focus:outline-none text-on-background font-body-sm text-body-sm pr-lg appearance-none">
+<option>Revenue</option>
+<option>Cost</option>
+<option>Profit</option>
+</select>
+<span class="material-symbols-outlined absolute right-md top-1/2 -translate-y-1/2 text-primary pointer-events-none" data-icon="expand_more">expand_more</span>
+</td>
+</tr>
+<tr class="border-b border-surface-variant hover:bg-surface-container-low transition-colors">
+<td class="py-sm px-md border-r border-surface-variant">loc_id</td>
+<td class="py-sm px-md">
+<select class="w-full bg-surface border border-outline-variant rounded-DEFAULT py-xs px-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary text-on-background font-body-sm text-body-sm">
+<option>Store ID</option>
+<option>Region</option>
+<option>Country</option>
+</select>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="flex justify-end">
+<button class="bg-primary text-on-primary font-body-sm text-body-sm font-semibold px-lg py-sm rounded-lg hover:bg-primary-container transition-colors shadow-sm">Confirm Mapping</button>
+</div>
+</section>
+</div>
+<!-- Right Column: Existing Datasets (Occupies 4 cols on large screens) -->
+<div class="lg:col-span-4 flex flex-col gap-md">
+<h2 class="font-headline-sm text-headline-sm font-bold text-on-background mb-xs">Your Datasets</h2>
+<!-- Dataset Card 1 -->
+<article class="bg-surface-container-lowest border border-outline-variant rounded-lg p-md hover:border-primary-container transition-colors group">
+<div class="flex justify-between items-start mb-sm">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors" data-icon="table_chart">table_chart</span>
+<h3 class="font-body-md text-body-md font-semibold text-on-background">Q3 Sales Data</h3>
+</div>
+<span class="font-label-caps text-label-caps text-on-secondary-container bg-[#e8f5e9] text-[#2e7d32] px-sm py-[2px] rounded-full uppercase">Processed</span>
+</div>
+<p class="font-mono-data text-mono-data text-on-surface-variant mb-md ml-[32px]">42,500 rows</p>
+<div class="flex gap-sm ml-[32px]">
+<button class="font-body-sm text-body-sm text-primary hover:text-primary-container font-medium transition-colors">Re-map</button>
+<span class="text-outline-variant">•</span>
+<button class="font-body-sm text-body-sm text-on-surface-variant hover:text-on-background font-medium transition-colors">Recompute</button>
+</div>
+</article>
+<!-- Dataset Card 2 -->
+<article class="bg-surface-container-lowest border border-outline-variant rounded-lg p-md hover:border-primary-container transition-colors group">
+<div class="flex justify-between items-start mb-sm">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors" data-icon="public">public</span>
+<h3 class="font-body-md text-body-md font-semibold text-on-background">Global Inventory</h3>
+</div>
+<span class="font-label-caps text-label-caps text-on-secondary-container bg-[#e8f5e9] text-[#2e7d32] px-sm py-[2px] rounded-full uppercase">Processed</span>
+</div>
+<p class="font-mono-data text-mono-data text-on-surface-variant mb-md ml-[32px]">128,040 rows</p>
+<div class="flex gap-sm ml-[32px]">
+<button class="font-body-sm text-body-sm text-primary hover:text-primary-container font-medium transition-colors">Re-map</button>
+<span class="text-outline-variant">•</span>
+<button class="font-body-sm text-body-sm text-on-surface-variant hover:text-on-background font-medium transition-colors">Recompute</button>
+</div>
+</article>
+<!-- Dataset Card 3 -->
+<article class="bg-surface-container-lowest border border-outline-variant rounded-lg p-md hover:border-primary-container transition-colors group">
+<div class="flex justify-between items-start mb-sm">
+<div class="flex items-center gap-sm">
+<span class="material-symbols-outlined text-outline-variant group-hover:text-primary transition-colors" data-icon="campaign">campaign</span>
+<h3 class="font-body-md text-body-md font-semibold text-on-background">Marketing Campaigns</h3>
+</div>
+<span class="font-label-caps text-label-caps text-on-secondary-container bg-[#fff3e0] text-[#ef6c00] px-sm py-[2px] rounded-full uppercase">Syncing</span>
+</div>
+<p class="font-mono-data text-mono-data text-on-surface-variant mb-md ml-[32px]">8,200 rows</p>
+<div class="flex gap-sm ml-[32px]">
+<button class="font-body-sm text-body-sm text-outline-variant cursor-not-allowed font-medium transition-colors" disabled="">Re-map</button>
+<span class="text-outline-variant">•</span>
+<button class="font-body-sm text-body-sm text-outline-variant cursor-not-allowed font-medium transition-colors" disabled="">Recompute</button>
+</div>
+</article>
+</div>
+</div>
+</main>
+</body></html>

@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Q&amp;A History - InsightEngine</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Hanken+Grotesk:wght@600;700&amp;family=Geist:wght@500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary-fixed-variant": "#2f2ebe",
+                        "primary-fixed": "#dfe0ff",
+                        "on-secondary-container": "#fffbff",
+                        "on-primary-fixed": "#000d60",
+                        "on-secondary-fixed": "#07006c",
+                        "surface-container-high": "#e7e8e9",
+                        "surface-container-low": "#f3f4f5",
+                        "tertiary-fixed-dim": "#ffb694",
+                        "on-tertiary-container": "#ffd3bf",
+                        "on-secondary": "#ffffff",
+                        "surface-tint": "#3b4fd2",
+                        "secondary-container": "#6063ee",
+                        "primary-container": "#3e52d5",
+                        "on-surface": "#191c1d",
+                        "on-tertiary": "#ffffff",
+                        "background": "#f8f9fa",
+                        "outline-variant": "#c5c5d7",
+                        "on-primary-container": "#d7daff",
+                        "secondary": "#4648d4",
+                        "error": "#ba1a1a",
+                        "inverse-on-surface": "#f0f1f2",
+                        "tertiary-container": "#a44200",
+                        "outline": "#757686",
+                        "on-primary": "#ffffff",
+                        "error-container": "#ffdad6",
+                        "surface-bright": "#f8f9fa",
+                        "surface": "#f8f9fa",
+                        "primary-fixed-dim": "#bbc3ff",
+                        "tertiary-fixed": "#ffdbcc",
+                        "surface-dim": "#d9dadb",
+                        "tertiary": "#7e3100",
+                        "on-background": "#191c1d",
+                        "on-tertiary-fixed-variant": "#7a2f00",
+                        "on-error-container": "#93000a",
+                        "secondary-fixed": "#e1e0ff",
+                        "inverse-surface": "#2e3132",
+                        "primary": "#2036bd",
+                        "surface-container-lowest": "#ffffff",
+                        "secondary-fixed-dim": "#c0c1ff",
+                        "on-error": "#ffffff",
+                        "inverse-primary": "#bbc3ff",
+                        "surface-container": "#edeeef",
+                        "on-primary-fixed-variant": "#1d34ba",
+                        "surface-variant": "#e1e3e4",
+                        "surface-container-highest": "#e1e3e4",
+                        "on-tertiary-fixed": "#351000",
+                        "on-surface-variant": "#454654"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "container-max": "1440px",
+                        "xs": "4px",
+                        "xl": "40px",
+                        "lg": "24px",
+                        "md": "16px",
+                        "sm": "8px",
+                        "base": "4px",
+                        "gutter": "24px"
+                    },
+                    "fontFamily": {
+                        "body-md": ["Inter"],
+                        "metric-lg": ["Hanken Grotesk"],
+                        "headline-sm": ["Hanken Grotesk"],
+                        "label-caps": ["Geist"],
+                        "metric-md": ["Hanken Grotesk"],
+                        "mono-data": ["Geist"],
+                        "body-sm": ["Inter"]
+                    },
+                    "fontSize": {
+                        "body-md": ["16px", { "lineHeight": "24px", "fontWeight": "400" }],
+                        "metric-lg": ["48px", { "lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "headline-sm": ["20px", { "lineHeight": "28px", "fontWeight": "600" }],
+                        "label-caps": ["12px", { "lineHeight": "16px", "letterSpacing": "0.05em", "fontWeight": "600" }],
+                        "metric-md": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.01em", "fontWeight": "600" }],
+                        "mono-data": ["13px", { "lineHeight": "18px", "fontWeight": "500" }],
+                        "body-sm": ["14px", { "lineHeight": "20px", "fontWeight": "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .material-symbols-outlined[data-weight="fill"] {
+            font-variation-settings: 'FILL' 1;
+        }
+        
+        /* Ambient shadow for elevated elements */
+        .ambient-shadow {
+            box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.05);
+        }
+        
+        /* Custom scrollbar for history list */
+        .history-scroll::-webkit-scrollbar {
+            width: 4px;
+        }
+        .history-scroll::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .history-scroll::-webkit-scrollbar-thumb {
+            background: #e1e3e4;
+            border-radius: 4px;
+        }
+        .history-scroll:hover::-webkit-scrollbar-thumb {
+            background: #c5c5d7;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen overflow-hidden">
+<!-- SideNavBar -->
+<nav class="bg-surface-container-lowest w-[240px] h-screen fixed left-0 top-0 border-r border-outline-variant flex flex-col h-full py-lg px-md z-40 hidden md:flex">
+<div class="mb-xl flex items-center gap-sm px-sm">
+<img alt="Organization Logo" class="w-8 h-8 rounded" data-alt="A clean, minimalist logo mark for a modern business intelligence tool, featuring abstract geometric shapes in deep indigo and cobalt blue against a crisp white background. The logo conveys precision, data architecture, and technological sophistication. High-key lighting, hyper-sharp rendering." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCSYNfv7nmhEPeRu_kpLYD7XEJ1bNO-iMGw1rSoA7OOG7qf4GC2IBBKbDJkKlyyj7HLroSclM6BKBgCR7VDPAooTQ7TBuwz6zZVlbs4P2b_vOhukuKxeKiS9AOIaQ8rUetNaHQ4jrTtqxtu9VFxJbSldv9gY7uL2aXJlBdj4a4ygJFF6MVJURsltPczneghqv-4GKaGa6k8ekBa4rwbKz_G5FCcCu3MBwusiVQlKE5Wc_YDeQlQoAk1"/>
+<div>
+<h1 class="font-headline-sm text-headline-sm font-bold text-primary">InsightEngine</h1>
+<p class="font-label-caps text-label-caps text-on-surface-variant">BI Assistant</p>
+</div>
+</div>
+<button class="w-full bg-primary-container text-on-primary-container rounded-lg py-sm px-md mb-lg font-body-sm hover:bg-surface-tint transition-colors duration-200 flex items-center justify-center gap-sm shadow-sm">
+<span class="material-symbols-outlined" style="font-size: 18px;">add</span>
+            New Analysis
+        </button>
+<ul class="flex flex-col gap-xs flex-grow">
+<li>
+<a class="flex items-center gap-md px-sm py-sm rounded-DEFAULT text-on-surface-variant hover:bg-surface-container-low transition-colors duration-200 active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-body-md text-body-md">Dashboard</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-md px-sm py-sm rounded-DEFAULT text-on-surface-variant hover:bg-surface-container-low transition-colors duration-200 active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined" data-icon="database">database</span>
+<span class="font-body-md text-body-md">Data Sources</span>
+</a>
+</li>
+<li>
+<a class="flex items-center gap-md px-sm py-sm rounded-DEFAULT text-on-surface-variant hover:bg-surface-container-low transition-colors duration-200 active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+<span class="font-body-md text-body-md">Reports</span>
+</a>
+</li>
+<!-- Active State -->
+<li class="relative">
+<a class="flex items-center gap-md px-sm py-sm rounded-DEFAULT bg-surface-container text-primary font-semibold border-l-4 border-primary transition-colors duration-200 active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined" data-icon="psychology" data-weight="fill">psychology</span>
+<span class="font-body-md text-body-md">AI Insights</span>
+</a>
+</li>
+<li class="mt-auto">
+<a class="flex items-center gap-md px-sm py-sm rounded-DEFAULT text-on-surface-variant hover:bg-surface-container-low transition-colors duration-200 active:scale-[0.98]" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-body-md text-body-md">Settings</span>
+</a>
+</li>
+</ul>
+</nav>
+<!-- TopNavBar -->
+<header class="bg-surface-container-lowest/80 backdrop-blur-md h-16 fixed top-0 right-0 left-0 md:left-[240px] border-b border-outline-variant flex justify-between items-center px-lg w-full z-30 transition-all">
+<div class="flex items-center gap-md">
+<button class="md:hidden p-sm rounded-full hover:bg-surface-container text-on-surface-variant">
+<span class="material-symbols-outlined">menu</span>
+</button>
+<div class="relative group hidden sm:block">
+<span class="material-symbols-outlined absolute left-sm top-1/2 -translate-y-1/2 text-outline" style="font-size: 20px;">search</span>
+<input class="bg-surface-container-low border border-transparent rounded-lg py-xs pl-[36px] pr-sm text-body-sm font-body-sm w-64 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-outline-variant transition-all bg-white" placeholder="Search..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-sm">
+<button class="p-2 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors focus-within:ring-2 focus-within:ring-primary/20">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="p-2 rounded-full text-on-surface-variant hover:bg-surface-container transition-colors focus-within:ring-2 focus-within:ring-primary/20">
+<span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
+</button>
+<div class="w-8 h-8 rounded-full ml-sm overflow-hidden border border-outline-variant cursor-pointer hover:ring-2 hover:ring-primary/20 transition-all">
+<img alt="Manager Profile" class="w-full h-full object-cover" data-alt="A professional headshot of a female executive in her late 30s with dark hair pulled back, wearing a minimalist white blouse. Photographed against a plain light gray studio background with soft, flattering lighting. Corporate portrait style, highly detailed." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCWQU_P9m7-olyNKPABaCu-EbpSmsRYxfJgLtQ-saigyPdPmdWOnQlzzLlRQRnqwXzJdzCKCBJPgM6qkmsEkI8idFezqow1yGSBOdxw2cj69PZead_GiFvbkfpjRvvbDh13Pc-LjObRVMSbXIr1BbhJxN6A6045EarCnQbhSi4-HWh8hc_NXxFc9XmMTss4r9h2lAlQTyvvXcN_8GozH9g3TTtnobzv-Ue6tY9ek_agTVNstNFSZsHD"/>
+</div>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="pt-16 md:pl-[240px] h-screen w-full flex">
+<!-- Left Column: History List -->
+<aside class="w-full md:w-[320px] lg:w-[400px] h-full border-r border-outline-variant bg-surface-container-lowest flex flex-col flex-shrink-0">
+<div class="p-md border-b border-outline-variant flex items-center justify-between sticky top-0 bg-surface-container-lowest z-10">
+<h2 class="font-headline-sm text-headline-sm text-on-surface">Q&amp;A History</h2>
+<button class="text-on-surface-variant hover:bg-surface-container-low p-sm rounded-full transition-colors">
+<span class="material-symbols-outlined" style="font-size: 20px;">filter_list</span>
+</button>
+</div>
+<div class="flex-1 overflow-y-auto history-scroll p-sm space-y-sm">
+<!-- Today -->
+<div class="font-label-caps text-label-caps text-on-surface-variant px-sm pt-sm pb-xs">Today</div>
+<!-- Active Item -->
+<div class="p-md rounded-lg bg-surface-container-low border border-primary/20 cursor-pointer relative group overflow-hidden">
+<div class="absolute left-0 top-0 bottom-0 w-1 bg-primary"></div>
+<div class="flex justify-between items-start mb-xs">
+<span class="font-mono-data text-mono-data text-on-surface-variant text-[11px]">2 hours ago</span>
+<div class="flex gap-1">
+<span class="w-2 h-2 rounded-full bg-green-500 mt-1"></span>
+</div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface font-medium line-clamp-2">What is the Q3 revenue breakdown by regional store performance?</p>
+</div>
+<div class="p-md rounded-lg border border-transparent hover:border-outline-variant hover:bg-surface-container-lowest cursor-pointer transition-all">
+<div class="flex justify-between items-start mb-xs">
+<span class="font-mono-data text-mono-data text-on-surface-variant text-[11px]">5 hours ago</span>
+<div class="flex gap-1">
+<span class="w-2 h-2 rounded-full bg-amber-500 mt-1"></span>
+</div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant line-clamp-2">Show me the top 5 product categories with declining margins over the last 6 months.</p>
+</div>
+<!-- Yesterday -->
+<div class="font-label-caps text-label-caps text-on-surface-variant px-sm pt-md pb-xs">Yesterday</div>
+<div class="p-md rounded-lg border border-transparent hover:border-outline-variant hover:bg-surface-container-lowest cursor-pointer transition-all">
+<div class="flex justify-between items-start mb-xs">
+<span class="font-mono-data text-mono-data text-on-surface-variant text-[11px]">Oct 24</span>
+<div class="flex gap-1">
+<span class="w-2 h-2 rounded-full bg-green-500 mt-1"></span>
+</div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant line-clamp-2">Compare customer acquisition costs between Google Ads and LinkedIn campaigns.</p>
+</div>
+<div class="p-md rounded-lg border border-transparent hover:border-outline-variant hover:bg-surface-container-lowest cursor-pointer transition-all">
+<div class="flex justify-between items-start mb-xs">
+<span class="font-mono-data text-mono-data text-on-surface-variant text-[11px]">Oct 24</span>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant line-clamp-2">Inventory levels for SKUs starting with 'TECH' across all East Coast warehouses.</p>
+</div>
+<!-- Previous 7 Days -->
+<div class="font-label-caps text-label-caps text-on-surface-variant px-sm pt-md pb-xs">Previous 7 Days</div>
+<div class="p-md rounded-lg border border-transparent hover:border-outline-variant hover:bg-surface-container-lowest cursor-pointer transition-all">
+<div class="flex justify-between items-start mb-xs">
+<span class="font-mono-data text-mono-data text-on-surface-variant text-[11px]">Oct 21</span>
+<div class="flex gap-1">
+<span class="w-2 h-2 rounded-full bg-green-500 mt-1"></span>
+</div>
+</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant line-clamp-2">Identify the core reasons for churn among enterprise clients in Q2.</p>
+</div>
+</div>
+</aside>
+<!-- Right Column: Detail View -->
+<section class="flex-1 overflow-y-auto bg-background p-lg relative hidden md:block">
+<div class="max-w-[800px] mx-auto pb-xl">
+<!-- Action Bar -->
+<div class="flex justify-between items-center mb-xl">
+<div class="flex gap-2">
+<button class="px-sm py-xs border border-outline-variant rounded-md text-on-surface-variant font-body-sm hover:bg-surface-container-lowest transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined" style="font-size: 16px;">ios_share</span> Share
+                        </button>
+<button class="px-sm py-xs border border-outline-variant rounded-md text-on-surface-variant font-body-sm hover:bg-surface-container-lowest transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined" style="font-size: 16px;">content_copy</span> Copy
+                        </button>
+</div>
+<button class="p-sm text-on-surface-variant hover:bg-surface-container-low rounded-full transition-colors" title="Delete">
+<span class="material-symbols-outlined" style="font-size: 20px;">delete</span>
+</button>
+</div>
+<!-- Original Question -->
+<div class="mb-xl">
+<h2 class="font-metric-md text-metric-md text-on-surface mb-sm leading-tight">What is the Q3 revenue breakdown by regional store performance?</h2>
+<div class="flex items-center gap-md text-on-surface-variant font-mono-data text-mono-data">
+<span>Asked 2 hours ago</span>
+<span class="w-1 h-1 rounded-full bg-outline-variant"></span>
+<span>By You</span>
+</div>
+</div>
+<!-- AI Answer Canvas -->
+<div class="bg-surface-container-lowest rounded-xl border border-outline-variant ambient-shadow p-lg">
+<!-- Metadata Header -->
+<div class="flex items-center gap-sm pb-md border-b border-outline-variant mb-md">
+<span class="material-symbols-outlined text-primary" data-icon="auto_awesome">auto_awesome</span>
+<span class="font-label-caps text-label-caps text-on-surface font-semibold">InsightEngine Response</span>
+<div class="ml-auto inline-flex items-center gap-1 bg-green-50 text-green-700 px-2 py-1 rounded-full font-label-caps text-[10px] border border-green-200">
+<span class="material-symbols-outlined" style="font-size: 12px;">check_circle</span>
+                            VERIFIED
+                        </div>
+</div>
+<!-- Answer Text -->
+<div class="font-body-md text-body-md text-on-surface space-y-md mb-lg">
+<p>Based on the latest transactional data for Q3, the total revenue across all regions reached <strong>$4.2M</strong>, representing a 12% increase compared to Q2.</p>
+<p>The <strong>North Region</strong> was the top performer, contributing 45% of the total revenue, driven largely by strong sales in the flagship New York store. The West Region showed the highest quarter-over-quarter growth (18%), while the South Region experienced a slight decline (-3%) attributed to supply chain disruptions in late August.</p>
+</div>
+<!-- Visualization Card -->
+<div class="bg-surface border border-outline-variant rounded-lg p-md mb-lg relative overflow-hidden group">
+<div class="absolute inset-0 z-0 opacity-10">
+<!-- Abstract pattern instead of background image -->
+<div class="w-full h-full bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-primary to-transparent" style="background-size: 20px 20px; opacity: 0.2"></div>
+</div>
+<div class="relative z-10">
+<div class="flex justify-between items-start mb-md">
+<div>
+<h4 class="font-headline-sm text-headline-sm text-on-surface mb-xs">Q3 Regional Revenue</h4>
+<p class="font-label-caps text-label-caps text-on-surface-variant">IN MILLIONS (USD)</p>
+</div>
+<span class="material-symbols-outlined text-outline-variant cursor-pointer hover:text-on-surface">more_vert</span>
+</div>
+<!-- Simple CSS Bar Chart Simulation -->
+<div class="flex items-end h-40 gap-lg mt-lg pl-lg border-l border-b border-outline-variant pb-xs relative">
+<!-- Y-Axis Labels -->
+<div class="absolute left-[-20px] top-0 bottom-0 flex flex-col justify-between text-[10px] text-outline font-mono-data py-2">
+<span>2.0</span>
+<span>1.0</span>
+<span>0</span>
+</div>
+<div class="w-1/4 h-[95%] bg-primary rounded-t-sm relative group cursor-pointer">
+<div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-surface-container-highest px-2 py-1 rounded text-[10px] font-mono-data opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">$1.89M</div>
+<div class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-mono-data text-on-surface-variant">North</div>
+</div>
+<div class="w-1/4 h-[60%] bg-primary-container rounded-t-sm relative group cursor-pointer">
+<div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-surface-container-highest px-2 py-1 rounded text-[10px] font-mono-data opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">$1.20M</div>
+<div class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-mono-data text-on-surface-variant">West</div>
+</div>
+<div class="w-1/4 h-[40%] bg-secondary-fixed-dim rounded-t-sm relative group cursor-pointer">
+<div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-surface-container-highest px-2 py-1 rounded text-[10px] font-mono-data opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">$0.78M</div>
+<div class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-mono-data text-on-surface-variant">East</div>
+</div>
+<div class="w-1/4 h-[20%] bg-outline-variant rounded-t-sm relative group cursor-pointer">
+<div class="absolute -top-6 left-1/2 -translate-x-1/2 bg-surface-container-highest px-2 py-1 rounded text-[10px] font-mono-data opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">$0.33M</div>
+<div class="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-mono-data text-on-surface-variant">South</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Collapsible Query Details -->
+<div class="border border-outline-variant rounded-lg overflow-hidden" id="query-container">
+<button class="w-full bg-surface-container-low px-md py-sm flex justify-between items-center text-on-surface-variant hover:bg-surface-container transition-colors" onclick="document.getElementById('sql-content').classList.toggle('hidden'); document.getElementById('query-icon').innerText = document.getElementById('sql-content').classList.contains('hidden') ? 'expand_more' : 'expand_less';">
+<span class="font-label-caps text-label-caps font-semibold flex items-center gap-xs">
+<span class="material-symbols-outlined" style="font-size: 16px;">code</span>
+                                View generated query
+                            </span>
+<span class="material-symbols-outlined" id="query-icon">expand_more</span>
+</button>
+<div class="bg-inverse-surface p-md hidden" id="sql-content">
+<pre class="font-mono-data text-mono-data text-primary-fixed-dim overflow-x-auto text-[12px] leading-relaxed"><span class="text-tertiary-fixed">SELECT</span> 
+  r.region_name,
+  <span class="text-tertiary-fixed">SUM</span>(s.amount) <span class="text-tertiary-fixed">AS</span> total_revenue
+<span class="text-tertiary-fixed">FROM</span> sales s
+<span class="text-tertiary-fixed">JOIN</span> stores st <span class="text-tertiary-fixed">ON</span> s.store_id = st.id
+<span class="text-tertiary-fixed">JOIN</span> regions r <span class="text-tertiary-fixed">ON</span> st.region_id = r.id
+<span class="text-tertiary-fixed">WHERE</span> 
+  s.transaction_date &gt;= <span class="text-green-300">'2023-07-01'</span> 
+  <span class="text-tertiary-fixed">AND</span> s.transaction_date &lt;= <span class="text-green-300">'2023-09-30'</span>
+<span class="text-tertiary-fixed">GROUP BY</span> r.region_name
+<span class="text-tertiary-fixed">ORDER BY</span> total_revenue <span class="text-tertiary-fixed">DESC</span>;</pre>
+</div>
+</div>
+</div>
+<!-- Feedback Footer -->
+<div class="mt-lg flex justify-center gap-md">
+<p class="font-label-caps text-label-caps text-on-surface-variant flex items-center">Was this answer helpful?</p>
+<div class="flex gap-2">
+<button class="p-1 rounded hover:bg-surface-container text-outline hover:text-primary transition-colors">
+<span class="material-symbols-outlined" style="font-size: 20px;">thumb_up</span>
+</button>
+<button class="p-1 rounded hover:bg-surface-container text-outline hover:text-error transition-colors">
+<span class="material-symbols-outlined" style="font-size: 20px;">thumb_down</span>
+</button>
+</div>
+</div>
+</div>
+</section>
+</main>
+</body></html>

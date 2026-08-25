@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Ask AI - Cognitive Logic</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Hanken+Grotesk:wght@600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "primary-fixed-dim": "#bbc3ff",
+                    "on-tertiary-fixed": "#351000",
+                    "surface-variant": "#e1e3e4",
+                    "surface-container-low": "#f3f4f5",
+                    "on-error-container": "#93000a",
+                    "surface-tint": "#3b4fd2",
+                    "primary-fixed": "#dfe0ff",
+                    "on-error": "#ffffff",
+                    "on-primary": "#ffffff",
+                    "surface-container-high": "#e7e8e9",
+                    "on-primary-container": "#d7daff",
+                    "surface-container-highest": "#e1e3e4",
+                    "primary-container": "#3e52d5",
+                    "on-surface-variant": "#454654",
+                    "tertiary": "#7e3100",
+                    "secondary-fixed": "#e1e0ff",
+                    "tertiary-container": "#a44200",
+                    "surface-bright": "#f8f9fa",
+                    "surface": "#f8f9fa",
+                    "secondary-container": "#6063ee",
+                    "inverse-primary": "#bbc3ff",
+                    "tertiary-fixed": "#ffdbcc",
+                    "on-secondary-container": "#fffbff",
+                    "on-tertiary": "#ffffff",
+                    "outline-variant": "#c5c5d7",
+                    "on-tertiary-container": "#ffd3bf",
+                    "error": "#ba1a1a",
+                    "outline": "#757686",
+                    "inverse-surface": "#2e3132",
+                    "on-secondary": "#ffffff",
+                    "on-secondary-fixed-variant": "#2f2ebe",
+                    "on-surface": "#191c1d",
+                    "surface-container-lowest": "#ffffff",
+                    "tertiary-fixed-dim": "#ffb694",
+                    "surface-dim": "#d9dadb",
+                    "background": "#f8f9fa",
+                    "on-tertiary-fixed-variant": "#7a2f00",
+                    "secondary-fixed-dim": "#c0c1ff",
+                    "on-primary-fixed-variant": "#1d34ba",
+                    "on-secondary-fixed": "#07006c",
+                    "error-container": "#ffdad6",
+                    "on-background": "#191c1d",
+                    "on-primary-fixed": "#000d60",
+                    "surface-container": "#edeeef",
+                    "secondary": "#4648d4",
+                    "primary": "#2036bd",
+                    "inverse-on-surface": "#f0f1f2"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "base": "4px",
+                    "gutter": "24px",
+                    "container-max": "1440px",
+                    "md": "16px",
+                    "sm": "8px",
+                    "xs": "4px",
+                    "xl": "40px",
+                    "lg": "24px"
+            },
+            "fontFamily": {
+                    "mono-data": [
+                            "Geist"
+                    ],
+                    "metric-lg": [
+                            "Hanken Grotesk"
+                    ],
+                    "metric-md": [
+                            "Hanken Grotesk"
+                    ],
+                    "headline-sm": [
+                            "Hanken Grotesk"
+                    ],
+                    "label-caps": [
+                            "Geist"
+                    ],
+                    "body-sm": [
+                            "Inter"
+                    ],
+                    "body-md": [
+                            "Inter"
+                    ]
+            },
+            "fontSize": {
+                    "mono-data": [
+                            "13px",
+                            {
+                                    "lineHeight": "18px",
+                                    "fontWeight": "500"
+                            }
+                    ],
+                    "metric-lg": [
+                            "48px",
+                            {
+                                    "lineHeight": "56px",
+                                    "letterSpacing": "-0.02em",
+                                    "fontWeight": "700"
+                            }
+                    ],
+                    "metric-md": [
+                            "32px",
+                            {
+                                    "lineHeight": "40px",
+                                    "letterSpacing": "-0.01em",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "headline-sm": [
+                            "20px",
+                            {
+                                    "lineHeight": "28px",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "label-caps": [
+                            "12px",
+                            {
+                                    "lineHeight": "16px",
+                                    "letterSpacing": "0.05em",
+                                    "fontWeight": "600"
+                            }
+                    ],
+                    "body-sm": [
+                            "14px",
+                            {
+                                    "lineHeight": "20px",
+                                    "fontWeight": "400"
+                            }
+                    ],
+                    "body-md": [
+                            "16px",
+                            {
+                                    "lineHeight": "24px",
+                                    "fontWeight": "400"
+                            }
+                    ]
+            }
+          }
+        }
+      }
+    </script>
+<style>
+        body { background-color: theme('colors.background'); color: theme('colors.on-background'); }
+        .sql-block { display: none; }
+        .sql-block.active { display: block; }
+    </style>
+</head>
+<body class="font-body-md text-body-md h-screen overflow-hidden flex">
+<!-- SideNavBar -->
+<nav class="bg-surface-container-lowest dark:bg-inverse-surface fixed left-0 top-0 h-full w-[240px] border-r border-outline-variant dark:border-outline z-50 flex flex-col h-full py-lg">
+<div class="px-md mb-xl flex items-center gap-3 cursor-pointer">
+<div class="w-8 h-8 rounded bg-primary-container flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary-container" data-icon="auto_graph">auto_graph</span>
+</div>
+<div>
+<h1 class="font-headline-sm text-headline-sm font-bold text-primary dark:text-primary-fixed-dim">Cognitive Logic</h1>
+<p class="font-label-caps text-label-caps text-on-surface-variant">Business Intelligence</p>
+</div>
+</div>
+<div class="flex flex-col gap-1 px-sm">
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-container-low dark:hover:bg-surface-container-high px-4 py-2 rounded-lg flex items-center gap-3 transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+                Dashboard
+            </a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-container-low dark:hover:bg-surface-container-high px-4 py-2 rounded-lg flex items-center gap-3 transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="database">database</span>
+                Data Sources
+            </a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-container-low dark:hover:bg-surface-container-high px-4 py-2 rounded-lg flex items-center gap-3 transition-colors duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+                Reports
+            </a>
+<a class="bg-surface-container dark:bg-surface-container-highest text-primary dark:text-primary-fixed-dim border-l-4 border-primary dark:border-primary-fixed-dim px-4 py-2 rounded-r-lg flex items-center gap-3 transition-colors duration-200 opacity-90 transition-opacity" href="#">
+<span class="material-symbols-outlined" data-icon="psychology">psychology</span>
+                AI Insights
+            </a>
+<a class="text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-container-low dark:hover:bg-surface-container-high px-4 py-2 rounded-lg flex items-center gap-3 transition-colors duration-200 mt-auto" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+                Settings
+            </a>
+</div>
+<div class="mt-auto px-md pt-lg border-t border-outline-variant dark:border-outline mx-sm">
+<div class="flex items-center gap-3">
+<img alt="Manager Profile" class="w-8 h-8 rounded-full object-cover border border-outline-variant" data-alt="A small, professional headshot portrait of a business manager, well-lit, isolated on a clean neutral background, highly detailed, photorealistic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuApZW2dOkt87DMrLD7-wRGe2fhmGzOzaCRkgJa2loFoqJly0nc86xAQxB-4wPatDZQet8Q-J__hIkdTG25JeRfr4ZT2ZOLC5lCE6ccoCoNIRP7fMfwyvckXUs6Um0gMh8qbJVhF9fQrZBrKsG8Akq_ULe80UNDnXYRUBLNn4U9MAQOLa8KUHnIHyOri6aWU8Ti62cTtmBisp1_HZcuKk9KIou8G8HiicKlyZby9oxHNsC747htfV5ym"/>
+<div class="flex-1 min-w-0">
+<p class="font-body-sm text-body-sm font-medium text-on-surface truncate">Manager Profile</p>
+</div>
+</div>
+</div>
+</nav>
+<!-- TopNavBar -->
+<header class="bg-surface dark:bg-on-surface fixed top-0 right-0 w-[calc(100%-240px)] z-40 border-b border-outline-variant dark:border-outline flex justify-between items-center h-16 px-lg ml-[240px]">
+<div class="flex items-center gap-4 flex-1">
+<div class="relative w-64 focus-within:ring-2 focus-within:ring-primary/10 rounded-md">
+<span class="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline" data-icon="search">search</span>
+<input class="w-full bg-surface-container-low border-none rounded-md pl-10 pr-4 py-2 font-body-sm text-body-sm text-on-surface placeholder:text-outline focus:ring-0 focus:outline-none" placeholder="Search..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="w-8 h-8 rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary dark:hover:text-primary-fixed-dim transition-colors hover:bg-surface-container-low">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="w-8 h-8 rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary dark:hover:text-primary-fixed-dim transition-colors hover:bg-surface-container-low">
+<span class="material-symbols-outlined" data-icon="help_outline">help_outline</span>
+</button>
+<img alt="Manager Avatar" class="w-8 h-8 rounded-full object-cover border border-outline-variant" data-alt="A small, professional headshot portrait of a business manager, well-lit, isolated on a clean neutral background, highly detailed, photorealistic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBHquUnVB01kH5zz7XId-2TNFFAipxOGtZlwHL8UF3PE38AaTgxPnrpLyCWUJSn1R-2pbzrNRMgakSyu3H7-qYMgpHO-YbJP_bWo5ufeq0d4OMMRg0faYbKbS_j9BFwv8DiA8SGKYRwlrPO2hfLRJpSAbKyS6f1M01vuCSj3u1iF3cnAbfirMP2GL6yWaOQgeGUqxgdAQJx_0UA0N17wbY0sY0iKLiM04TnOTi2c318QbN9mLZg0V4A"/>
+</div>
+</header>
+<!-- Main Content -->
+<main class="ml-[240px] mt-16 flex-1 flex flex-col h-[calc(100vh-64px)] w-full">
+<!-- Chat Area -->
+<div class="flex-1 overflow-y-auto p-gutter flex flex-col gap-6 max-w-4xl mx-auto w-full pb-32">
+<div class="text-center text-outline font-label-caps text-label-caps py-4">Today</div>
+<!-- User Message -->
+<div class="flex justify-end w-full">
+<div class="bg-primary text-on-primary rounded-2xl rounded-tr-sm px-4 py-3 max-w-[80%] shadow-sm">
+<p class="font-body-md text-body-md">Show me last month's revenue by store region.</p>
+</div>
+</div>
+<!-- AI Message -->
+<div class="flex justify-start w-full gap-3">
+<div class="w-8 h-8 rounded bg-surface-tint/10 flex items-center justify-center shrink-0 mt-1 border border-primary/20">
+<span class="material-symbols-outlined text-primary text-sm" data-icon="psychology">psychology</span>
+</div>
+<div class="flex flex-col gap-2 max-w-[85%] w-full">
+<div class="bg-surface-container-lowest border border-outline-variant rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm text-on-surface">
+<p class="font-body-md text-body-md mb-3">Here is the revenue breakdown by store region for last month. The North region led sales with $1.2M.</p>
+<!-- Inline Chart Card -->
+<div class="border border-outline-variant rounded-lg p-4 bg-surface-bright mb-3">
+<h4 class="font-label-caps text-label-caps text-on-surface-variant mb-4">Revenue by Region (Last Month)</h4>
+<div class="h-48 w-full flex items-end justify-around gap-2 px-2 pb-2 border-b border-outline-variant relative">
+<!-- Mock Bars -->
+<div class="w-full bg-primary/20 hover:bg-primary/30 transition-colors rounded-t-sm h-[80%] relative group">
+<div class="absolute -top-6 left-1/2 -translate-x-1/2 font-mono-data text-mono-data opacity-0 group-hover:opacity-100 transition-opacity text-on-surface">$1.2M</div>
+</div>
+<div class="w-full bg-primary/20 hover:bg-primary/30 transition-colors rounded-t-sm h-[65%] relative group">
+<div class="absolute -top-6 left-1/2 -translate-x-1/2 font-mono-data text-mono-data opacity-0 group-hover:opacity-100 transition-opacity text-on-surface">$980K</div>
+</div>
+<div class="w-full bg-primary/20 hover:bg-primary/30 transition-colors rounded-t-sm h-[40%] relative group">
+<div class="absolute -top-6 left-1/2 -translate-x-1/2 font-mono-data text-mono-data opacity-0 group-hover:opacity-100 transition-opacity text-on-surface">$650K</div>
+</div>
+<div class="w-full bg-primary/20 hover:bg-primary/30 transition-colors rounded-t-sm h-[55%] relative group">
+<div class="absolute -top-6 left-1/2 -translate-x-1/2 font-mono-data text-mono-data opacity-0 group-hover:opacity-100 transition-opacity text-on-surface">$820K</div>
+</div>
+</div>
+<div class="flex justify-around mt-2 font-mono-data text-[10px] text-outline">
+<span>North</span>
+<span>South</span>
+<span>East</span>
+<span>West</span>
+</div>
+</div>
+<!-- Badge & SQL Toggle -->
+<div class="flex items-center justify-between border-t border-outline-variant pt-2 mt-2">
+<div class="flex items-center gap-1.5 px-2 py-1 bg-green-50 rounded-full">
+<span class="material-symbols-outlined text-[14px] text-green-700" data-icon="check_circle">check_circle</span>
+<span class="font-label-caps text-[10px] text-green-700">Verified</span>
+</div>
+<button class="font-label-caps text-label-caps text-primary hover:underline flex items-center gap-1" onclick="document.getElementById('sql1').classList.toggle('active')">
+<span class="material-symbols-outlined text-[14px]" data-icon="code">code</span> View query
+                            </button>
+</div>
+<!-- SQL Block -->
+<div class="sql-block mt-3 bg-inverse-surface rounded-md p-3 overflow-x-auto" id="sql1">
+<pre class="font-mono-data text-mono-data text-surface-container-lowest"><code class="text-blue-300">SELECT</code> region, <code class="text-purple-300">SUM</code>(revenue) <code class="text-blue-300">AS</code> total_revenue
+<code class="text-blue-300">FROM</code> sales_data
+<code class="text-blue-300">WHERE</code> date &gt;= <code class="text-green-300">DATE_TRUNC</code>(<span class="text-yellow-200">'month'</span>, <code class="text-green-300">CURRENT_DATE</code> - <code class="text-blue-300">INTERVAL</code> <span class="text-yellow-200">'1 month'</span>)
+  <code class="text-blue-300">AND</code> date &lt; <code class="text-green-300">DATE_TRUNC</code>(<span class="text-yellow-200">'month'</span>, <code class="text-green-300">CURRENT_DATE</code>)
+<code class="text-blue-300">GROUP BY</code> region
+<code class="text-blue-300">ORDER BY</code> total_revenue <code class="text-blue-300">DESC</code>;</pre>
+</div>
+</div>
+</div>
+</div>
+<!-- User Message -->
+<div class="flex justify-end w-full">
+<div class="bg-primary text-on-primary rounded-2xl rounded-tr-sm px-4 py-3 max-w-[80%] shadow-sm">
+<p class="font-body-md text-body-md">Are there any anomalies in the West region data?</p>
+</div>
+</div>
+<!-- AI Message -->
+<div class="flex justify-start w-full gap-3">
+<div class="w-8 h-8 rounded bg-surface-tint/10 flex items-center justify-center shrink-0 mt-1 border border-primary/20">
+<span class="material-symbols-outlined text-primary text-sm" data-icon="psychology">psychology</span>
+</div>
+<div class="flex flex-col gap-2 max-w-[85%] w-full">
+<div class="bg-surface-container-lowest border border-outline-variant rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm text-on-surface">
+<p class="font-body-md text-body-md mb-3">I found one potential anomaly. There was a sudden drop in transaction volume on the 15th of last month that deviates from the expected trend by 32%.</p>
+<!-- Badge & SQL Toggle -->
+<div class="flex items-center justify-between border-t border-outline-variant pt-2 mt-2">
+<div class="flex items-center gap-1.5 px-2 py-1 bg-amber-50 rounded-full">
+<span class="material-symbols-outlined text-[14px] text-amber-700" data-icon="warning">warning</span>
+<span class="font-label-caps text-[10px] text-amber-700">Needs review</span>
+</div>
+<button class="font-label-caps text-label-caps text-primary hover:underline flex items-center gap-1" onclick="document.getElementById('sql2').classList.toggle('active')">
+<span class="material-symbols-outlined text-[14px]" data-icon="code">code</span> View query
+                            </button>
+</div>
+<!-- SQL Block -->
+<div class="sql-block mt-3 bg-inverse-surface rounded-md p-3 overflow-x-auto" id="sql2">
+<pre class="font-mono-data text-mono-data text-surface-container-lowest">/* Query logic for anomaly detection omitted for brevity */
+<code class="text-blue-300">SELECT</code> date, volume, expected_volume, deviation 
+<code class="text-blue-300">FROM</code> anomaly_detection_results 
+<code class="text-blue-300">WHERE</code> region = <span class="text-yellow-200">'West'</span> <code class="text-blue-300">AND</code> deviation &gt; <span class="text-yellow-200">0.2</span>;</pre>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Input Area (Fixed Bottom) -->
+<div class="absolute bottom-0 left-[240px] right-0 bg-surface/90 backdrop-blur-md border-t border-outline-variant p-4 z-10">
+<div class="max-w-4xl mx-auto flex flex-col gap-3">
+<!-- Quick Actions -->
+<div class="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+<button class="whitespace-nowrap px-3 py-1.5 rounded-full border border-outline-variant bg-surface-container-lowest text-on-surface-variant font-body-sm text-body-sm hover:bg-surface-container-low transition-colors">Show monthly trends</button>
+<button class="whitespace-nowrap px-3 py-1.5 rounded-full border border-outline-variant bg-surface-container-lowest text-on-surface-variant font-body-sm text-body-sm hover:bg-surface-container-low transition-colors">Compare Q1 to Q2</button>
+<button class="whitespace-nowrap px-3 py-1.5 rounded-full border border-outline-variant bg-surface-container-lowest text-on-surface-variant font-body-sm text-body-sm hover:bg-surface-container-low transition-colors">Forecast next month</button>
+</div>
+<!-- Input Box -->
+<div class="relative bg-surface-container-lowest border border-outline-variant rounded-xl shadow-sm focus-within:ring-2 focus-within:ring-primary/20 focus-within:border-primary transition-all flex items-end p-2">
+<div class="pl-2 pb-2">
+<span class="material-symbols-outlined text-primary/70 animate-pulse" data-icon="auto_awesome">auto_awesome</span>
+</div>
+<textarea class="w-full bg-transparent border-none focus:ring-0 resize-none font-body-md text-body-md text-on-surface placeholder:text-outline max-h-32 py-2 px-3 no-scrollbar" oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'" placeholder="Ask a question about your data..." rows="1"></textarea>
+<div class="pr-1 pb-1">
+<button class="w-8 h-8 rounded-lg bg-primary text-on-primary flex items-center justify-center hover:bg-primary-container transition-colors shadow-sm">
+<span class="material-symbols-outlined text-sm" data-icon="send">send</span>
+</button>
+</div>
+</div>
+<div class="text-center font-label-caps text-[10px] text-outline">AI can make mistakes. Verify critical data.</div>
+</div>
+</div>
+</main>
+<style>
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .no-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</body></html>
