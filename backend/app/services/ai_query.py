@@ -11,7 +11,17 @@ import httpx
 
 from app.config import settings
 from app.models import DataSource
-from app.services.schema_context import build_schema_prompt, heuristic_sql
+from app.services.response_planner import (
+    NARRATIVE_SYSTEM,
+    build_narrative_prompt,
+    sanitize_narrative,
+)
+from app.services.schema_context import (
+    build_schema_prompt,
+    build_workspace_schema_prompt,
+    heuristic_sql,
+    pick_source_for_question,
+)
 from app.services.schema_registry import parse_connection_config
 from app.services.sql_sandbox import ensure_limit, validate_readonly_sql
 
@@ -22,8 +32,24 @@ Rules:
 - SELECT or WITH only. No writes, DDL, or multiple statements.
 - Use only tables/columns from the schema.
 - Prefer LIMIT 50 unless the user asks for a specific limit.
-- For MySQL, use backticks for identifiers when needed.
+- For MySQL / SQLite, use backticks for identifiers when needed.
 - Do not wrap the SQL in markdown fences.
+"""
+
+WORKSPACE_SYSTEM_PROMPT = """You are a SQL expert for a business intelligence workspace with multiple datasets.
+The user asks questions against ALL ingested data. You must:
+1. Choose exactly ONE SOURCE_ID from the catalog that best answers the question.
+2. Write a single read-only SQL query for that source only (no cross-source joins).
+
+Respond with EXACTLY this format (no markdown fences):
+SOURCE_ID: <id>
+SQL:
+<single SELECT or WITH query>
+
+Rules:
+- SELECT or WITH only. No writes, DDL, or multiple statements.
+- Use only tables/columns from the chosen source.
+- Prefer LIMIT 50 unless the user asks for a specific limit.
 """
 
 
@@ -53,6 +79,45 @@ async def generate_sql(
     return sql, "heuristic"
 
 
+async def generate_workspace_sql(
+    sources: list[DataSource],
+    question: str,
+    *,
+    api_key: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> tuple[DataSource, str, str]:
+    """Pick a source + SQL for a workspace question. Returns (source, sql, mode)."""
+    if not sources:
+        raise ValueError("No data sources ingested yet. Add a dataset first.")
+
+    key = api_key if api_key is not None else settings.openai_api_key
+    mdl = model or settings.openai_model
+    url = base_url or settings.openai_base_url
+
+    if key and len(sources) > 1:
+        source_id, sql = await _openai_workspace_sql(
+            sources, question, api_key=key, model=mdl, base_url=url
+        )
+        by_id = {s.id: s for s in sources}
+        source = by_id.get(source_id) or pick_source_for_question(sources, question) or sources[0]
+        return source, sql, "openai"
+
+    if key:
+        source = sources[0]
+        sql = await _openai_sql(source, question, api_key=key, model=mdl, base_url=url)
+        return source, sql, "openai"
+
+    source = pick_source_for_question(sources, question) or sources[0]
+    sql = heuristic_sql(source, question)
+    if not sql:
+        raise ValueError(
+            "No OpenAI API key configured and could not build a heuristic query. "
+            "Set it in Settings or OPENAI_API_KEY in .env"
+        )
+    return source, sql, "heuristic"
+
+
 async def _openai_sql(
     source: DataSource,
     question: str,
@@ -62,15 +127,55 @@ async def _openai_sql(
     base_url: str,
 ) -> str:
     schema_text = build_schema_prompt(source)
+    content = await _chat_completion(
+        system=SYSTEM_PROMPT,
+        user=f"{schema_text}\n\nQuestion: {question}\n\nSQL:",
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+    )
+    return _strip_sql_fences(content)
+
+
+async def _openai_workspace_sql(
+    sources: list[DataSource],
+    question: str,
+    *,
+    api_key: str,
+    model: str,
+    base_url: str,
+) -> tuple[int, str]:
+    catalog = build_workspace_schema_prompt(sources)
+    content = await _chat_completion(
+        system=WORKSPACE_SYSTEM_PROMPT,
+        user=f"{catalog}\n\nQuestion: {question}",
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+    )
+    content = _strip_sql_fences(content)
+    source_match = re.search(r"SOURCE_ID\s*:\s*(\d+)", content, flags=re.IGNORECASE)
+    sql_match = re.search(r"SQL\s*:\s*(.+)", content, flags=re.IGNORECASE | re.DOTALL)
+    if not source_match or not sql_match:
+        picked = pick_source_for_question(sources, question) or sources[0]
+        return picked.id, content.strip()
+    return int(source_match.group(1)), sql_match.group(1).strip()
+
+
+async def _chat_completion(
+    *,
+    system: str,
+    user: str,
+    api_key: str,
+    model: str,
+    base_url: str,
+) -> str:
     payload = {
         "model": model,
         "temperature": 0,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"{schema_text}\n\nQuestion: {question}\n\nSQL:",
-            },
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
         ],
     }
     headers = {
@@ -85,8 +190,10 @@ async def _openai_sql(
         )
         res.raise_for_status()
         data = res.json()
+    return data["choices"][0]["message"]["content"].strip()
 
-    content = data["choices"][0]["message"]["content"].strip()
+
+def _strip_sql_fences(content: str) -> str:
     content = re.sub(r"^```(?:sql)?\s*", "", content, flags=re.IGNORECASE)
     content = re.sub(r"\s*```$", "", content)
     return content.strip()
@@ -252,3 +359,56 @@ def _safe_col(name: str, index: int) -> str:
 
 def pack_result(result: dict[str, Any]) -> str:
     return json.dumps(result, default=str)
+
+
+async def generate_narrative(
+    question: str,
+    columns: list[str],
+    rows: list[dict[str, Any]],
+    *,
+    api_key: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+    source_name: str | None = None,
+) -> str | None:
+    """Ask the model to summarise the returned rows. None when unavailable.
+
+    The prompt carries the actual rows, so the summary stays grounded in the
+    query result rather than the model's own recollection.
+    """
+    key = api_key if api_key is not None else settings.openai_api_key
+    if not key or not rows:
+        return None
+
+    mdl = model or settings.openai_model
+    url = base_url or settings.openai_base_url
+    prompt = build_narrative_prompt(question, columns, rows, source_name=source_name)
+
+    payload = {
+        "model": mdl,
+        "temperature": 0.2,
+        "max_tokens": 220,
+        "messages": [
+            {"role": "system", "content": NARRATIVE_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+    }
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            res = await client.post(
+                f"{url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            res.raise_for_status()
+            data = res.json()
+        content = data["choices"][0]["message"]["content"]
+    except Exception:
+        # A narrative is a nicety; the deterministic summary already covers it.
+        return None
+
+    cleaned = sanitize_narrative(content)
+    return cleaned or None

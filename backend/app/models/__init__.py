@@ -50,6 +50,10 @@ class Query(Base):
     generated_sql: Mapped[str | None] = mapped_column(Text, nullable=True)
     result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="pending")
+    # Groups the questions asked in one sitting so history can show them together.
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    answer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    response_format: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped["User | None"] = relationship(back_populates="queries")

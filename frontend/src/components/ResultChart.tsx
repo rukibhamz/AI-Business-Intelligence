@@ -39,6 +39,15 @@ function toNumber(value: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
+/** Parse a label as a date, or null when it is an ordinary category. */
+function labelDate(value: unknown): number | null {
+  const text = String(value ?? '').trim()
+  // Require a date-ish shape so plain numeric categories are not misread.
+  if (!/^\d{4}[-/]\d{1,2}([-/]\d{1,2})?/.test(text)) return null
+  const ms = Date.parse(text)
+  return Number.isNaN(ms) ? null : ms
+}
+
 export function ResultChart({ result, chart, chartType, height = 220 }: Props) {
   const type = chartType || chart?.type || 'table'
   if (type === 'table' || !result.rows.length) return null
@@ -51,7 +60,17 @@ export function ResultChart({ result, chart, chartType, height = 220 }: Props) {
 
   if (!labelKey || valueKeys.length === 0) return null
 
-  const data = result.rows.slice(0, 40).map((row) => {
+  const rows = result.rows.slice(0, 40)
+
+  // A line chart implies time order. The SQL may be sorted by a measure
+  // instead (e.g. ORDER BY revenue DESC), which would draw a meaningless
+  // zig-zag, so re-sort chronologically when the labels are dates.
+  const ordered =
+    type === 'line' && rows.every((row) => labelDate(row[labelKey]) !== null)
+      ? [...rows].sort((a, b) => labelDate(a[labelKey])! - labelDate(b[labelKey])!)
+      : rows
+
+  const data = ordered.map((row) => {
     const item: Record<string, string | number> = {
       [labelKey]: String(row[labelKey] ?? ''),
     }

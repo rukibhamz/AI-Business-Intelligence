@@ -97,6 +97,53 @@ live data refreshes.
 
 ---
 
+## 3-0. Answer presentation guardrail
+
+Not every question wants a chart. The **server** picks the shape of the answer
+in `backend/app/services/response_planner.py` and returns it as
+`response_format`; the UI renders that verdict and does not second-guess it.
+
+| Format | When | Renders as |
+|--------|------|-----------|
+| `metric` | one row, one number ("how many…", "total…") | large figure + one sentence |
+| `chart` | a comparison or a series the data supports | chart card, rows collapsed |
+| `narrative` | "why", "explain", "summarise", "how did…" | prose, plus a supporting chart only for a real series |
+| `table` | "list", "show rows", wide results, one record, no numeric column | the grid |
+| `empty` | query returned no rows | a sentence saying so |
+
+**Chart type** comes from `chart_recommend.py`, in this order: a date axis is a
+line (never a pie — slices of a whole make no sense across periods); several
+measures compare as bars; a handful of categories is a pie; everything else is
+a bar.
+
+**Grounding rule:** the sentence is written from the rows that came back. With
+an AI provider key the model is given those exact rows and told to use only
+them; without a key `describe_result()` computes the summary arithmetically.
+Never assert anything the result set does not contain.
+
+---
+
+## 3a. Routing
+
+Every view owns a URL, so a reload, bookmark, or Back button lands on the same
+screen. Implemented with the History API in `frontend/src/lib/router.ts` — no
+router dependency.
+
+| View | Path |
+|------|------|
+| Analysis (landing) | `/ask` — `/` resolves here |
+| Q&A History | `/history` (`?q=<id>` selects a question) |
+| Dashboard | `/dashboard` |
+| Findings | `/findings` |
+| Data Sources | `/data-sources` |
+| Settings | `/settings` |
+
+Unknown paths are rewritten to the landing page without adding a history entry.
+Deep links need an SPA fallback: the Vite dev server does this by default, and
+`frontend/public/.htaccess` covers the built app under Apache/XAMPP.
+
+---
+
 ## 3b. Theming
 
 Two themes ship: light (default) and dark. The active theme is stamped as
@@ -165,7 +212,7 @@ carry less separation on a dark canvas).
 - **Metric card:** `metric-lg` value → `label-caps` label → semantic chip / sparkline
 - **Data table:** `label-caps` headers on gray fill; 1px bottom borders only
 - **Chips:** Soft semantic bg + strong semantic text
-- **Nav:** grouped (Workspace / Intelligence / Configure); active = `--cl-accent-quiet` fill + 3px accent left marker; collapsed rail shows hover tooltips
+- **Nav:** grouped (Analyze / Workspace / Configure), New Analysis first; active = `--cl-accent-quiet` fill + 3px accent left marker; collapsed rail shows hover tooltips. The sidebar carries **no** primary action button — the nav item is the single entry point
 - **Empty state / skeleton / inline message / spinner:** `components/Feedback.tsx`
 - **Search:** topbar button opens the command palette (Ctrl/Cmd+K) over pages, data sources, and past questions
 
@@ -182,6 +229,10 @@ carry less separation on a dark canvas).
 | Theme helpers | `frontend/src/lib/theme.ts` |
 | Value formatting | `frontend/src/lib/format.ts` |
 | Navigation model | `frontend/src/layouts/navigation.ts` |
+| Answer presentation | `backend/app/services/response_planner.py` |
+| Analysis sessions | `frontend/src/lib/session.ts` |
+| Router | `frontend/src/lib/router.ts` |
+| Apache SPA fallback | `frontend/public/.htaccess` |
 | Shared feedback UI | `frontend/src/components/Feedback.tsx` |
 | Command palette | `frontend/src/components/CommandPalette.tsx` |
 | Live charts | `frontend/src/components/LiveChart.tsx` |
@@ -193,7 +244,7 @@ carry less separation on a dark canvas).
 | Login | ✅ Done | `docs/mockups/login.png` + Stitch `login_stitch.html` | `frontend/src/pages/LoginPage.tsx` |
 | App shell / sidebar | ✅ Done | `docs/mockups/sidebar-style.png` | `AppShell.tsx` — floating rail, grouped nav, collapse, mobile drawer, theme toggle |
 | Data sources | ✅ Done | Stitch mockup | `DataSourcesPage.tsx` |
-| AI chat / query | ✅ Done | Stitch mockup | `AskAiPage.tsx` (New Analysis) |
+| AI chat / query | ✅ Done | Stitch mockup | `AskAiPage.tsx` — landing page; thread persists, stop/retry, result cards |
 | Q&A History | ✅ Done | `docs/mockups/qa-history.png` + `stitch_qa_history/code.html` | `HistoryPage.tsx` |
 | Findings / Reports | ✅ Done | `docs/mockups/findings.png` + `stitch_findings/code.html` | `FindingsPage.tsx` (live findings + pinned reports) |
 | Overview dashboard | ✅ Done | Stitch mockup | `OverviewPage.tsx` |
@@ -207,6 +258,10 @@ carry less separation on a dark canvas).
 1b. **The UI renders live data only.** Never ship placeholder KPIs, sample findings, or fake chart series. When the data cannot support a metric, render an empty state that says what is missing and links to the fix.
 1c. Use `--cl-accent*` for interactive accents, not the raw `--cl-primary*` scheme inputs.
 1d. Mark decorative Material Symbols spans `aria-hidden="true"`; icon-only controls need an `aria-label`.
+1e. A new view must be added to `AppView`, `NAV_ITEMS`, `PAGE_META`, **and** `ROUTES` — a view without a URL cannot survive a reload.
+1f. One action, one control. Do not add a button that duplicates an existing nav destination.
+1g. Do not render a chart because one is available — render what `response_format` says. A question answered by a number gets a number.
+1h. Every sentence shown to the user must be derivable from the returned rows.
 2. Do not introduce purple gradients, heavy multi-shadows, or decorative glow aesthetics that conflict with Refined Minimalism.
 3. When a mockup conflicts with tokens, prefer the mockup for that screen and note the exception here.
 4. Update §7 screen backlog when a mockup is implemented.

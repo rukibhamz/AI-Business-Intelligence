@@ -71,17 +71,21 @@ def recommend_chart(
     n = len(rows)
     chart_type = "bar"
     reason = "category_vs_metric"
+    temporal = bool(categorical) and _looks_temporal(label_key, rows)
 
-    if n >= 8 and categorical and _looks_temporal(label_key, rows):
-        chart_type = "line"
-        reason = "temporal_series"
-    elif n <= 8 and len(value_keys) == 1 and categorical:
-        # Pie works best with few categories
-        chart_type = "pie" if n <= 6 else "bar"
-        reason = "few_categories" if chart_type == "pie" else "category_vs_metric"
+    # Time comes first: a date axis is a line (or a bar for very few points),
+    # never a pie — slices of a whole make no sense across periods.
+    if temporal:
+        chart_type = "line" if n >= 3 else "bar"
+        reason = "temporal_series" if chart_type == "line" else "few_periods"
     elif len(value_keys) > 1:
-        chart_type = "line" if n >= 6 else "bar"
+        # Several measures compare best side by side.
+        chart_type = "bar"
         reason = "multi_metric"
+    elif n <= 6 and categorical:
+        # Pie only for a small set of parts that add up to a meaningful whole.
+        chart_type = "pie"
+        reason = "few_categories"
 
     return {
         "type": chart_type,

@@ -1,14 +1,30 @@
 export type AppView = 'overview' | 'findings' | 'sources' | 'chat' | 'history' | 'settings'
 
+export type NavGroup = 'Analyze' | 'Workspace' | 'Configure'
+
 export type NavItem = {
   id: AppView
   label: string
   icon: string
   description: string
-  group: 'Workspace' | 'Intelligence' | 'Configure'
+  group: NavGroup
 }
 
 export const NAV_ITEMS: NavItem[] = [
+  {
+    id: 'chat',
+    label: 'Analysis',
+    icon: 'auto_awesome',
+    description: 'Ask a question about your data in plain English',
+    group: 'Analyze',
+  },
+  {
+    id: 'history',
+    label: 'Q&A History',
+    icon: 'history',
+    description: 'Review previous questions and results',
+    group: 'Analyze',
+  },
   {
     id: 'overview',
     label: 'Dashboard',
@@ -31,20 +47,6 @@ export const NAV_ITEMS: NavItem[] = [
     group: 'Workspace',
   },
   {
-    id: 'chat',
-    label: 'Ask AI',
-    icon: 'auto_awesome',
-    description: 'Ask questions about your data in plain English',
-    group: 'Intelligence',
-  },
-  {
-    id: 'history',
-    label: 'Q&A History',
-    icon: 'history',
-    description: 'Review previous questions and results',
-    group: 'Intelligence',
-  },
-  {
     id: 'settings',
     label: 'Settings',
     icon: 'settings',
@@ -53,9 +55,17 @@ export const NAV_ITEMS: NavItem[] = [
   },
 ]
 
-export const NAV_GROUPS: NavItem['group'][] = ['Workspace', 'Intelligence', 'Configure']
+export const NAV_GROUPS: NavGroup[] = ['Analyze', 'Workspace', 'Configure']
 
 export const PAGE_META: Record<AppView, { title: string; subtitle: string }> = {
+  chat: {
+    title: 'Analysis',
+    subtitle: 'Ask a question — answered with SQL run against your own data',
+  },
+  history: {
+    title: 'Q&A History',
+    subtitle: 'Every question asked and the result it returned',
+  },
   overview: {
     title: 'Dashboard',
     subtitle: 'Live performance computed from your connected data',
@@ -67,14 +77,6 @@ export const PAGE_META: Record<AppView, { title: string; subtitle: string }> = {
   sources: {
     title: 'Data Sources',
     subtitle: 'Manage and map your business datasets',
-  },
-  chat: {
-    title: 'Ask AI',
-    subtitle: 'Natural-language questions answered with SQL over your data',
-  },
-  history: {
-    title: 'Q&A History',
-    subtitle: 'Every question asked and the result it returned',
   },
   settings: {
     title: 'Settings',

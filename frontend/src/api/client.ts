@@ -58,6 +58,9 @@ export interface QueryResult {
   sql: string | null
 }
 
+/** How the UI should present an answer — chosen server-side per question. */
+export type ResponseFormat = 'metric' | 'narrative' | 'chart' | 'table' | 'empty'
+
 export interface QueryRecord {
   id: number
   data_source_id: number
@@ -69,6 +72,10 @@ export interface QueryRecord {
   explanation: string | null
   mode: string | null
   chart?: ChartRecommendation | null
+  session_id?: string | null
+  /** Plain-language answer grounded in the returned rows. */
+  answer?: string | null
+  response_format?: ResponseFormat | null
 }
 
 export interface ChartRecommendation {
@@ -310,10 +317,18 @@ export const api = {
     if (table) params.set('table', table)
     return requestJson<PreviewResponse>(`/sources/${id}/preview?${params}`)
   },
-  runQuery: (data_source_id: number, natural_language: string) =>
+  runQuery: (
+    natural_language: string,
+    options?: { dataSourceId?: number; sessionId?: string; signal?: AbortSignal },
+  ) =>
     requestJson<QueryRecord>('/queries/run', {
       method: 'POST',
-      body: JSON.stringify({ data_source_id, natural_language }),
+      signal: options?.signal,
+      body: JSON.stringify({
+        natural_language,
+        ...(options?.dataSourceId != null ? { data_source_id: options.dataSourceId } : {}),
+        ...(options?.sessionId ? { session_id: options.sessionId } : {}),
+      }),
     }),
   listQueries: (data_source_id?: number) => {
     const params = new URLSearchParams({ limit: '50' })

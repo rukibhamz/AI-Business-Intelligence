@@ -41,7 +41,7 @@ AI-Business-Intelligence/
 | Field | Value |
 |-------|-------|
 | **Last updated** | 2026-08-25 |
-| **Last agent/session** | Full UI upgrade — Manrope, theming, live-data-only |
+| **Last agent/session** | Answer-format guardrail + analysis sessions |
 | **Active phase** | Core product screens complete; Phase 6 next |
 | **Phase status** | All screens render live data; no placeholder content remains |
 | **Blockers** | None |
@@ -62,6 +62,35 @@ AI-Business-Intelligence/
       demo content and now render only computed values
 - [x] **Bug fix:** deleting a data source that had been queried returned 500
       (FK violation); dependent queries and dashboard widgets are now purged
+- [x] **URL routing** (`lib/router.ts`) — every view has a path, so reload,
+      bookmarks, and Back/Forward work; `/` lands on New Analysis
+- [x] **Nav consolidation** — removed the sidebar "New analysis" button and the
+      topbar "Ask AI" button; the renamed **New Analysis** nav item is the single
+      entry point and the landing page
+- [x] **Ask AI rebuild** — thread persists across navigation and reload, stop a
+      running query, retry a failed one, copy answer, result/chart/SQL as
+      separate cards, sticky table headers, timestamps
+- [x] **Bug fix:** `POST /queries/run` 422'd because `QueryCreate.data_source_id`
+      was required while the UI asks workspace-wide (server was serving stale code)
+- [x] **Bug fix:** a 422 body (`detail` as an array of objects) was rendered
+      straight into JSX and crashed the page
+- [x] **Bug fix:** line charts plotted dates in SQL order (e.g. `ORDER BY revenue`),
+      drawing a meaningless zig-zag; `ResultChart` now sorts date labels chronologically
+- [x] **Answer-format guardrail** (`services/response_planner.py`) — the server
+      decides metric / chart / narrative / table per question and returns
+      `response_format`; the UI renders that instead of always drawing a chart
+- [x] **Grounded natural-language answers** — `answer` is written from the rows
+      that came back (LLM with the rows in the prompt when a key is set,
+      otherwise computed arithmetically); stored and replayed in history
+- [x] **Chart-type fix:** a date axis is never a pie chart
+- [x] **Heuristic planner learned GROUP BY** — "revenue by region" now aggregates
+      by region instead of dumping rows sorted by revenue; "over time" groups by
+      the date column chronologically; counting questions use `COUNT(*)`
+- [x] **Analysis sessions** — `queries.session_id` groups the questions asked in
+      one sitting; Q&A History shows them as one collapsible analysis
+- [x] Sidebar item renamed **Analysis**; "New session" starts a fresh transcript
+- [x] Lightweight column migration in `database.py` (`create_all` cannot add
+      columns to an existing table); replace with Alembic in Phase 6
 
 ### 2.3 What To Do Next
 
@@ -237,6 +266,7 @@ See `.env.example`. Minimum for Phase 1:
 
 | Date | Agent/Human | Work Done |
 |------|-------------|-----------|
+| 2026-08-25 | Agent | Ask AI: ChatGPT/Claude-style composer; workspace-wide queries (no source picker) |
 | 2026-08-25 | Agent | Q&A History screen from Stitch; AI Insights → history, New Analysis → chat |
 | 2026-08-25 | Agent | Findings/Reports UI from Stitch; severity cards + color cleanup |
 | 2026-08-25 | Agent | Sidebar redesign (floating rail, collapse, tooltips) + Plus Jakarta Sans |

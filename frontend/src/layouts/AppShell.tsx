@@ -188,17 +188,6 @@ export function AppShell({
         </button>
       </div>
 
-      <button
-        type="button"
-        className="shell-new-analysis"
-        aria-label="New analysis"
-        onClick={() => navigate('chat')}
-        data-tooltip="New analysis"
-      >
-        <span className="material-symbols-outlined" aria-hidden="true">add</span>
-        <span className="shell-nav-label">New analysis</span>
-      </button>
-
       <nav className="shell-nav-scroll" aria-label="Main navigation">
         {NAV_GROUPS.map((group) => {
           const items = NAV_ITEMS.filter((item) => item.group === group)
@@ -425,16 +414,6 @@ export function AppShell({
               </div>
             )}
           </div>
-
-          <button
-            type="button"
-            className="shell-ask-btn"
-            aria-label="Ask AI"
-            onClick={() => navigate('chat')}
-          >
-            <span className="material-symbols-outlined filled" aria-hidden="true">auto_awesome</span>
-            <span>Ask AI</span>
-          </button>
 
           <span
             className={`shell-api${apiOnline ? ' is-ok' : ''}`}

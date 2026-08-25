@@ -14,7 +14,8 @@ import {
 import { CommandPalette, type PaletteAction } from './components/CommandPalette'
 import { InlineMessage } from './components/Feedback'
 import { AppShell } from './layouts/AppShell'
-import type { AppView } from './layouts/navigation'
+import { useRouter } from './lib/router'
+import { startNewSession } from './lib/session'
 import { AskAiPage } from './pages/AskAiPage'
 import { DataSourcesPage } from './pages/DataSourcesPage'
 import { FindingsPage } from './pages/FindingsPage'
@@ -32,7 +33,8 @@ function App() {
   const [queries, setQueries] = useState<QueryRecord[]>([])
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<AppView>('overview')
+  const { location, navigate, setSearch } = useRouter()
+  const view = location.view
   const [branding, setBranding] = useState<AppSettings | null>(null)
 
   // Live findings power the sidebar badge, the alerts popover, the dashboard
@@ -45,7 +47,12 @@ function App() {
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [refreshToken, setRefreshToken] = useState(0)
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null)
-  const [focusQueryId, setFocusQueryId] = useState<number | null>(null)
+
+  const focusQueryId = (() => {
+    const raw = new URLSearchParams(location.search).get('q')
+    const parsed = raw ? Number(raw) : NaN
+    return Number.isFinite(parsed) ? parsed : null
+  })()
 
   useEffect(() => {
     const token = getToken()
@@ -140,15 +147,14 @@ function App() {
 
   function handlePaletteAction(action: PaletteAction) {
     if (action.kind === 'navigate') {
-      setView(action.view)
+      navigate(action.view)
     } else if (action.kind === 'source') {
-      setView('sources')
+      navigate('sources')
     } else if (action.kind === 'query') {
-      setFocusQueryId(action.id)
-      setView('history')
+      navigate('history', { search: `?q=${action.id}` })
     } else if (action.kind === 'ask') {
       setPendingQuestion(action.text)
-      setView('chat')
+      navigate('chat')
     }
   }
 
@@ -170,7 +176,7 @@ function App() {
       <AppShell
         user={user}
         view={view}
-        onNavigate={setView}
+        onNavigate={navigate}
         onLogout={handleLogout}
         onOpenSearch={() => setPaletteOpen(true)}
         onRefresh={refreshAll}
@@ -190,7 +196,7 @@ function App() {
 
         {view === 'overview' && (
           <OverviewPage
-            onNavigate={setView}
+            onNavigate={navigate}
             findings={findings}
             findingsLoading={findingsLoading}
             refreshToken={refreshToken}
@@ -204,7 +210,7 @@ function App() {
             error={findingsError}
             generatedAt={findingsAt}
             onRefresh={() => void loadFindings()}
-            onNavigate={setView}
+            onNavigate={navigate}
           />
         )}
 
@@ -235,8 +241,11 @@ function App() {
             branding={branding}
             user={user}
             focusQueryId={focusQueryId}
-            onFocusConsumed={() => setFocusQueryId(null)}
-            onNewAnalysis={() => setView('chat')}
+            onSelectQuery={(id) => setSearch(id == null ? '' : `?q=${id}`)}
+            onNewAnalysis={() => {
+              startNewSession()
+              navigate('chat')
+            }}
           />
         )}
 

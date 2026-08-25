@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type AppSettings, type QueryRecord, type User } from '../api/client'
 import { EmptyState, InlineMessage, Skeleton } from '../components/Feedback'
 import { ResultChart } from '../components/ResultChart'
@@ -10,10 +10,19 @@ type Props = {
   branding?: AppSettings | null
   user?: User | null
   focusQueryId?: number | null
-  onFocusConsumed?: () => void
+  /** Mirrors the selected question into the URL so a reload restores it. */
+  onSelectQuery?: (id: number | null) => void
 }
 
-type DayGroup = { label: string; items: QueryRecord[] }
+type SessionGroup = {
+  key: string
+  /** A session is titled by the question that opened it. */
+  title: string
+  startedAt: string
+  items: QueryRecord[]
+}
+
+type DayGroup = { label: string; sessions: SessionGroup[]; count: number }
 
 function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
@@ -36,30 +45,71 @@ function relativeWhen(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+/**
+ * Questions asked in one sitting share a `session_id`, so they are shown as one
+ * analysis. Older rows predate sessions and each stand alone.
+ */
+function groupIntoSessions(queries: QueryRecord[]): SessionGroup[] {
+  const order: string[] = []
+  const bySession = new Map<string, QueryRecord[]>()
+
+  for (const q of queries) {
+    const key = q.session_id || `single-${q.id}`
+    if (!bySession.has(key)) {
+      bySession.set(key, [])
+      order.push(key)
+    }
+    bySession.get(key)!.push(q)
+  }
+
+  return order.map((key) => {
+    // `queries` arrives newest-first; a session reads oldest-first inside.
+    const items = [...bySession.get(key)!].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    )
+    return {
+      key,
+      title: items[0].natural_language,
+      startedAt: items[0].created_at,
+      items,
+    }
+  })
+}
+
 function groupByDay(queries: QueryRecord[]): DayGroup[] {
   const now = new Date()
   const today = startOfDay(now)
   const yesterday = today - 86400000
   const weekAgo = today - 7 * 86400000
 
-  const buckets: Record<string, QueryRecord[]> = {
+  const buckets: Record<string, SessionGroup[]> = {
     Today: [],
     Yesterday: [],
     'Previous 7 Days': [],
     Earlier: [],
   }
 
-  for (const q of queries) {
-    const t = startOfDay(new Date(q.created_at))
-    if (t === today) buckets.Today.push(q)
-    else if (t === yesterday) buckets.Yesterday.push(q)
-    else if (t >= weekAgo) buckets['Previous 7 Days'].push(q)
-    else buckets.Earlier.push(q)
+  for (const session of groupIntoSessions(queries)) {
+    const t = startOfDay(new Date(session.startedAt))
+    if (t === today) buckets.Today.push(session)
+    else if (t === yesterday) buckets.Yesterday.push(session)
+    else if (t >= weekAgo) buckets['Previous 7 Days'].push(session)
+    else buckets.Earlier.push(session)
   }
 
   return Object.entries(buckets)
-    .filter(([, items]) => items.length > 0)
-    .map(([label, items]) => ({ label, items }))
+    .filter(([, sessions]) => sessions.length > 0)
+    .map(([label, sessions]) => ({
+      label,
+      sessions,
+      count: sessions.reduce((n, s) => n + s.items.length, 0),
+    }))
+}
+
+const CHART_TITLE: Record<string, string> = {
+  pie: 'Breakdown',
+  line: 'Trend',
+  bar: 'Comparison',
 }
 
 function statusDot(status: string): 'ok' | 'warn' | 'neutral' {
@@ -73,10 +123,18 @@ export function HistoryPage({
   branding,
   user,
   focusQueryId,
-  onFocusConsumed,
+  onSelectQuery,
 }: Props) {
   const [queries, setQueries] = useState<QueryRecord[]>([])
-  const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [selectedId, setSelectedIdState] = useState<number | null>(focusQueryId ?? null)
+
+  const setSelectedId = useCallback(
+    (id: number | null) => {
+      setSelectedIdState(id)
+      onSelectQuery?.(id)
+    },
+    [onSelectQuery],
+  )
   const [selected, setSelected] = useState<QueryRecord | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -92,16 +150,19 @@ export function HistoryPage({
       .listQueries()
       .then((list) => {
         setQueries(list)
-        if (list.length > 0) setSelectedId(list[0].id)
+        if (list.length === 0) return
+        // A stale `?q=` from a bookmark or a deleted query falls back to the
+        // newest question rather than leaving the pane blank.
+        const target = list.some((q) => q.id === focusQueryId) ? focusQueryId : list[0].id
+        setSelectedId(target ?? list[0].id)
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
-    if (focusQueryId == null) return
-    setSelectedId(focusQueryId)
-    onFocusConsumed?.()
+    if (focusQueryId == null || focusQueryId === selectedId) return
+    setSelectedIdState(focusQueryId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusQueryId])
 
@@ -143,7 +204,7 @@ export function HistoryPage({
     if (!selected) return
     const text = [
       selected.natural_language,
-      selected.explanation ?? '',
+      selected.answer ?? selected.explanation ?? '',
       selected.generated_sql ?? '',
     ]
       .filter(Boolean)
@@ -171,8 +232,12 @@ export function HistoryPage({
   }
 
   const verified = selected?.status === 'completed'
-  const showChart =
-    selected?.result && selected.chart && selected.chart.type !== 'table'
+  // Replay the same presentation guardrail the answer was written under, so a
+  // stored question reads in history exactly as it did when asked.
+  const format = selected?.response_format ?? null
+  const showChart = Boolean(
+    selected?.result && selected.chart && selected.chart.type !== 'table',
+  )
   const rows = selected?.result?.rows ?? []
   const cols = selected?.result?.columns ?? []
   const platformLabel = `${branding?.platform_name || 'Cognitive Logic'} response`
@@ -205,33 +270,66 @@ export function HistoryPage({
               <p>No questions asked yet</p>
               <button type="button" className="qa-new-btn" onClick={onNewAnalysis}>
                 <span className="material-symbols-outlined" aria-hidden="true">add</span>
-                New analysis
+                New session
               </button>
             </div>
           )}
 
           {groups.map((group) => (
             <div key={group.label} className="qa-group">
-              <p className="qa-group-label">{group.label}</p>
-              {group.items.map((q) => {
-                const dot = statusDot(q.status)
-                const active = q.id === selectedId
+              <p className="qa-group-label">
+                {group.label}
+                <span className="qa-group-count">{group.count}</span>
+              </p>
+
+              {group.sessions.map((session) => {
+                const multi = session.items.length > 1
+                const containsSelected = session.items.some((q) => q.id === selectedId)
                 return (
-                  <button
-                    key={q.id}
-                    type="button"
-                    className={`qa-item${active ? ' is-active' : ''}`}
-                    onClick={() => setSelectedId(q.id)}
+                  <div
+                    key={session.key}
+                    className={`qa-session${multi ? ' is-multi' : ''}${
+                      containsSelected ? ' is-current' : ''
+                    }`}
                   >
-                    {active && <span className="qa-item-accent" aria-hidden />}
-                    <div className="qa-item-meta">
-                      <span className="qa-item-when">{relativeWhen(q.created_at)}</span>
-                      {dot !== 'neutral' && (
-                        <span className={`qa-dot qa-dot--${dot}`} aria-hidden />
-                      )}
+                    {multi && (
+                      <div className="qa-session-head">
+                        <span className="material-symbols-outlined" aria-hidden="true">
+                          forum
+                        </span>
+                        <span className="qa-session-title" title={session.title}>
+                          {session.title}
+                        </span>
+                        <span className="qa-session-count">{session.items.length}</span>
+                      </div>
+                    )}
+
+                    <div className="qa-session-items">
+                      {session.items.map((q) => {
+                        const dot = statusDot(q.status)
+                        const active = q.id === selectedId
+                        return (
+                          <button
+                            key={q.id}
+                            type="button"
+                            className={`qa-item${active ? ' is-active' : ''}`}
+                            onClick={() => setSelectedId(q.id)}
+                          >
+                            {active && <span className="qa-item-accent" aria-hidden />}
+                            <div className="qa-item-meta">
+                              <span className="qa-item-when">
+                                {relativeWhen(q.created_at)}
+                              </span>
+                              {dot !== 'neutral' && (
+                                <span className={`qa-dot qa-dot--${dot}`} aria-hidden />
+                              )}
+                            </div>
+                            <p className="qa-item-text">{q.natural_language}</p>
+                          </button>
+                        )
+                      })}
                     </div>
-                    <p className="qa-item-text">{q.natural_language}</p>
-                  </button>
+                  </div>
                 )
               })}
             </div>
@@ -317,7 +415,8 @@ export function HistoryPage({
 
               <div className="qa-response-body">
                 <p>
-                  {selected.explanation ??
+                  {selected.answer ??
+                    selected.explanation ??
                     (selected.result
                       ? `Returned ${selected.result.rows.length} row(s).`
                       : selected.status === 'failed'
@@ -330,8 +429,12 @@ export function HistoryPage({
                 <div className="qa-viz">
                   <div className="qa-viz-head">
                     <div>
-                      <h3>{selected.chart?.type?.toUpperCase()} chart</h3>
-                      <p className="qa-viz-sub">Recommended visualization</p>
+                      <h3>{CHART_TITLE[selected.chart?.type ?? 'bar'] ?? 'Visualization'}</h3>
+                      <p className="qa-viz-sub">
+                        {format === 'narrative'
+                          ? 'Supporting view'
+                          : `${selected.chart?.type} chart`}
+                      </p>
                     </div>
                   </div>
                   <ResultChart result={selected.result} chart={selected.chart} height={220} />

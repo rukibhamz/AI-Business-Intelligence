@@ -10,18 +10,17 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models import DataSource, Query as QueryModel, User
 from app.schemas import ChartRecommendation, QueryCreate, QueryResponse, QueryResultPayload
-from app.services.ai_query import execute_sql, generate_sql, pack_result
+from app.services.ai_query import (
+    execute_sql,
+    generate_narrative,
+    generate_sql,
+    generate_workspace_sql,
+    pack_result,
+)
 from app.services.app_settings import get_ai_runtime
-from app.services.chart_recommend import recommend_chart
+from app.services.response_planner import describe_result, plan_response
 
 router = APIRouter(prefix="/queries", tags=["queries"])
-
-
-def _chart_for_result(result: QueryResultPayload | None) -> ChartRecommendation | None:
-    if not result:
-        return None
-    rec = recommend_chart(result.columns, result.rows)
-    return ChartRecommendation(**rec)
 
 
 def _to_response(
@@ -38,6 +37,17 @@ def _to_response(
             rows=raw.get("rows", []),
             sql=raw.get("sql") or query.generated_sql,
         )
+
+    # The presentation guardrail decides chart vs prose vs table. Replay it for
+    # stored queries so history renders the same way the answer first did.
+    chart: ChartRecommendation | None = None
+    response_format = query.response_format
+    if result:
+        plan = plan_response(query.natural_language, result.columns, result.rows)
+        response_format = response_format or plan["format"]
+        if response_format in ("chart", "narrative") and plan.get("chart"):
+            chart = ChartRecommendation(**plan["chart"])
+
     return QueryResponse(
         id=query.id,
         data_source_id=query.data_source_id,
@@ -48,7 +58,10 @@ def _to_response(
         result=result,
         explanation=explanation,
         mode=mode,
-        chart=_chart_for_result(result),
+        chart=chart,
+        session_id=query.session_id,
+        answer=query.answer,
+        response_format=response_format,
     )
 
 
@@ -72,15 +85,30 @@ async def run_query(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> QueryResponse:
-    source = await db.get(DataSource, payload.data_source_id)
-    if not source:
-        raise HTTPException(status_code=404, detail="Data source not found")
+    pinned: DataSource | None = None
+    sources: list[DataSource]
+
+    if payload.data_source_id is not None:
+        pinned = await db.get(DataSource, payload.data_source_id)
+        if not pinned:
+            raise HTTPException(status_code=404, detail="Data source not found")
+        sources = [pinned]
+    else:
+        sources = list(
+            (await db.execute(select(DataSource).order_by(DataSource.id))).scalars().all()
+        )
+        if not sources:
+            raise HTTPException(
+                status_code=400,
+                detail="No data sources ingested yet. Add a dataset under Data Sources first.",
+            )
 
     query = QueryModel(
         user_id=current_user.id,
-        data_source_id=payload.data_source_id,
+        data_source_id=sources[0].id,
         natural_language=payload.natural_language,
         status="running",
+        session_id=payload.session_id,
     )
     db.add(query)
     await db.commit()
@@ -89,19 +117,55 @@ async def run_query(
     mode = "heuristic"
     try:
         runtime = await get_ai_runtime(db)
-        sql, mode = await generate_sql(
-            source,
-            payload.natural_language,
-            api_key=runtime["api_key"],
-            model=runtime["model"],
-            base_url=runtime["base_url"],
-        )
+        if pinned is not None:
+            source = pinned
+            sql, mode = await generate_sql(
+                source,
+                payload.natural_language,
+                api_key=runtime["api_key"],
+                model=runtime["model"],
+                base_url=runtime["base_url"],
+            )
+        else:
+            source, sql, mode = await generate_workspace_sql(
+                sources,
+                payload.natural_language,
+                api_key=runtime["api_key"],
+                model=runtime["model"],
+                base_url=runtime["base_url"],
+            )
+            query.data_source_id = source.id
+
         result = await execute_sql(source, sql)
         query.generated_sql = result["sql"]
         query.result_json = pack_result(result)
         query.status = "completed"
+
+        columns = result["columns"]
+        rows = result["rows"]
+
+        # Guardrail: choose how to present this before writing the answer.
+        plan = plan_response(payload.natural_language, columns, rows)
+        query.response_format = plan["format"]
+
+        answer = await generate_narrative(
+            payload.natural_language,
+            columns,
+            rows,
+            api_key=runtime["api_key"],
+            model=runtime["model"],
+            base_url=runtime["base_url"],
+            source_name=source.name,
+        )
+        if not answer:
+            answer = describe_result(
+                payload.natural_language, columns, rows, plan, source_name=source.name
+            )
+        query.answer = answer
+
         explanation = (
-            f"Generated with {mode}. Returned {len(result['rows'])} row(s)."
+            f"Answered from “{source.name}” via {mode}. "
+            f"Returned {len(rows)} row(s)."
         )
     except Exception as exc:
         query.status = "failed"
@@ -124,6 +188,10 @@ async def create_query(
     current_user: User = Depends(get_current_user),
 ) -> QueryResponse:
     """Create a pending query record without executing (legacy). Prefer POST /queries/run."""
+    if payload.data_source_id is None:
+        raise HTTPException(
+            status_code=400, detail="data_source_id is required for pending queries"
+        )
     source = await db.get(DataSource, payload.data_source_id)
     if not source:
         raise HTTPException(status_code=404, detail="Data source not found")

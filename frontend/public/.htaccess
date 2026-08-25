@@ -1,0 +1,19 @@
+# SPA fallback for Apache/XAMPP.
+# Views own real URLs (/ask, /dashboard, /findings, …), so a direct request or a
+# reload must serve index.html and let the client router resolve the path.
+# The Vite dev server does this on its own; this file covers the built app.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Leave the API alone.
+  RewriteCond %{REQUEST_URI} ^/api/ [NC]
+  RewriteRule ^ - [L]
+
+  # Serve real files and directories as-is.
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  RewriteRule ^ index.html [L]
+</IfModule>

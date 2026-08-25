@@ -90,8 +90,12 @@ class PreviewResponse(BaseModel):
 
 
 class QueryCreate(BaseModel):
-    data_source_id: int
+    """Ask a question against the workspace. Optional source pins to one dataset."""
+
     natural_language: str = Field(..., min_length=1)
+    data_source_id: int | None = None
+    # Groups the questions asked in one sitting.
+    session_id: str | None = Field(None, max_length=64)
 
 
 class QueryResultPayload(BaseModel):
@@ -120,6 +124,11 @@ class QueryResponse(BaseModel):
     explanation: str | None = None
     mode: str | None = None
     chart: ChartRecommendation | None = None
+    session_id: str | None = None
+    #: Plain-language answer grounded in the returned rows.
+    answer: str | None = None
+    #: How the UI should present this answer.
+    response_format: str | None = None
 
 
 class QueryRunResponse(QueryResponse):
