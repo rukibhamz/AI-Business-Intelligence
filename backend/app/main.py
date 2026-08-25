@@ -49,7 +49,14 @@ async def lifespan(app: FastAPI):
     await init_db()
     async with async_session() as session:
         await ensure_bootstrap_admin(session)
-    logger.info("Started in %s mode", settings.app_env)
+    # A browser reports a rejected origin as an unexplained network failure, so
+    # the allowed list is worth stating plainly on every boot.
+    logger.info(
+        "Started in %s mode | auth: %s | CORS allows: %s",
+        settings.app_env,
+        settings.auth_provider,
+        ", ".join(settings.cors_origin_list) or "(nothing — every browser call will fail)",
+    )
     yield
 
 

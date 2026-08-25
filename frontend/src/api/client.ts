@@ -1,4 +1,11 @@
-const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
+/**
+ * Where the API lives.
+ *
+ * Vite inlines this at build time, so a deployment whose build did not have
+ * VITE_API_URL set silently calls /api on its own origin. Exported so the UI
+ * can say which address it tried when a request never arrives.
+ */
+export const API_BASE = import.meta.env.VITE_API_URL ?? '/api'
 const TOKEN_KEY = 'ai_bi_token'
 const USER_KEY = 'ai_bi_user'
 
@@ -595,4 +602,60 @@ export function parseSchema(raw: string | null): SourceSchema | null {
   } catch {
     return null
   }
+}
+
+
+/** Why a request never reached the API. */
+export type ReachabilityFailure =
+  | { kind: 'ok' }
+  | { kind: 'unreachable'; apiBase: string }
+  | { kind: 'blocked'; apiBase: string; origin: string }
+
+/**
+ * Work out why fetch failed.
+ *
+ * The browser reports a blocked origin and an unreachable host identically —
+ * both are a TypeError with no detail, on purpose, so a page cannot probe the
+ * network. A `no-cors` request gets round it for diagnosis only: it returns an
+ * opaque response the page cannot read, but *reaching* the server at all
+ * separates "the server said no" from "there was no server".
+ */
+export async function diagnoseReachability(): Promise<ReachabilityFailure> {
+  const base = API_BASE.startsWith('http') ? API_BASE : `${location.origin}${API_BASE}`
+  try {
+    await fetch(`${base}/health`, { mode: 'no-cors', cache: 'no-store' })
+    return { kind: 'blocked', apiBase: base, origin: location.origin }
+  } catch {
+    return { kind: 'unreachable', apiBase: base }
+  }
+}
+
+const NETWORK_FAILURE_HINTS = [
+  'failed to fetch',
+  'networkerror',
+  'load failed',
+  'network request failed',
+]
+
+export function isNetworkFailure(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '')
+  return NETWORK_FAILURE_HINTS.some((hint) => message.toLowerCase().includes(hint))
+}
+
+/** A sentence naming the actual problem, for a failure isNetworkFailure() matched. */
+export async function describeNetworkFailure(): Promise<string> {
+  const result = await diagnoseReachability()
+  if (result.kind === 'blocked') {
+    return (
+      `The API at ${result.apiBase} is running but refused a request from ${result.origin}. ` +
+      `Add ${result.origin} to CORS_ORIGINS on the API and redeploy it.`
+    )
+  }
+  if (result.kind === 'unreachable') {
+    return (
+      `Could not reach the API at ${result.apiBase}. Check that it is deployed and awake, ` +
+      'and that VITE_API_URL was set when this app was built.'
+    )
+  }
+  return 'Could not reach the server. Check that the backend is running, then try again.'
 }

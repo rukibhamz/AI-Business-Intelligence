@@ -1,5 +1,13 @@
 import { useState } from 'react'
-import { api, setSession, type AppSettings, type AuthConfig, type User } from '../api/client'
+import {
+  api,
+  describeNetworkFailure,
+  isNetworkFailure,
+  setSession,
+  type AppSettings,
+  type AuthConfig,
+  type User,
+} from '../api/client'
 import { signIn, signUp } from '../lib/auth'
 import './LoginPage.css'
 
@@ -31,6 +39,10 @@ export function LoginPage({
 
   function readableError(err: unknown): string {
     const message = err instanceof Error ? err.message : 'Sign-in failed'
+    if (isNetworkFailure(err)) {
+      // Replaced a moment later by the diagnosis, which needs a round trip.
+      return 'Could not reach the server…'
+    }
     if (message.includes('Incorrect') || message.includes('401')) {
       return 'Incorrect email or password'
     }
@@ -73,6 +85,9 @@ export function LoginPage({
       onSuccess(result.user)
     } catch (err) {
       setError(readableError(err))
+      // "Failed to fetch" covers both a blocked origin and a missing server.
+      // Find out which, and say so, rather than leaving the reader to guess.
+      if (isNetworkFailure(err)) setError(await describeNetworkFailure())
     } finally {
       setBusy(false)
     }

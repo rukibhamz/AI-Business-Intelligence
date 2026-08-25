@@ -165,6 +165,30 @@ third row: the process aborts on purpose, and Render reports it as a timeout.
 > Render's free tier sleeps when idle. The first request after a sleep takes
 > ~30 s, which looks like a hang in the UI. Use a paid instance if that matters.
 
+### 3.2.3 "Failed to fetch" when signing in
+
+The browser reports a rejected origin and an unreachable server identically, so
+the app now tells them apart for you and says which it is:
+
+- *"The API at … is running but refused a request from … Add … to CORS_ORIGINS"* —
+  the API is up; its `CORS_ORIGINS` does not list the frontend's origin. Set it
+  to the exact origin (scheme + host, no trailing slash, comma-separated for
+  several) and redeploy the **API**.
+- *"Could not reach the API at …"* — nothing answered. Either the service is
+  down or asleep, or `VITE_API_URL` was wrong when the frontend was built. The
+  message names the address it tried, which is what makes a bad build obvious.
+
+Two things that catch people out:
+
+1. `VITE_API_URL` is inlined **at build time**. Changing it in the dashboard does
+   nothing until the frontend is rebuilt. It must include `/api`, e.g.
+   `https://ai-bi-api.onrender.com/api`.
+2. An https frontend cannot call an http API — the browser blocks it as mixed
+   content, which also surfaces as "Failed to fetch".
+
+The API logs its allowed origins on every boot:
+`Started in production mode | auth: supabase | CORS allows: https://…`
+
 ### 3.3 Frontend on Vercel
 
 1. Import the repo, set **Root Directory** to `frontend` (required — otherwise

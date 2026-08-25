@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   api,
+  describeNetworkFailure,
+  isNetworkFailure,
   parseSchema,
   type AppSettings,
   type DataSource,
@@ -182,13 +184,11 @@ function timeLabel(at: number) {
  * HTTPException but as an array of objects for 422 validation errors, and
  * rendering that array directly would crash React.
  */
-/** fetch() rejects with a TypeError when the request never reached the server. */
-const NETWORK_FAILURES = ['failed to fetch', 'networkerror', 'load failed', 'network request failed']
-
 function errorDetail(err: unknown): string {
   const message = err instanceof Error ? err.message : 'Query failed'
-  if (NETWORK_FAILURES.some((hint) => message.toLowerCase().includes(hint))) {
-    return 'Could not reach the server. Check that the backend is running, then try again.'
+  if (isNetworkFailure(err)) {
+    // Replaced by describeNetworkFailure() once the probe comes back.
+    return 'Could not reach the server…'
   }
   try {
     const parsed = JSON.parse(message) as { detail?: unknown }
@@ -406,10 +406,11 @@ export function AskAiPage({
             },
           ])
         } else {
+          const id = uid()
           setMessages((prev) => [
             ...prev,
             {
-              id: uid(),
+              id,
               role: 'assistant',
               text: 'I could not answer that question.',
               question,
@@ -417,6 +418,13 @@ export function AskAiPage({
               at: Date.now(),
             },
           ])
+          // A network failure hides which of two very different problems it is.
+          if (isNetworkFailure(err)) {
+            const detail = await describeNetworkFailure()
+            setMessages((prev) =>
+              prev.map((m) => (m.id === id ? { ...m, error: detail } : m)),
+            )
+          }
         }
       } finally {
         abortRef.current = null
