@@ -3,7 +3,7 @@
 import pytest
 
 from app.services.chart_recommend import recommend_chart
-from app.services.response_planner import describe_result, plan_response
+from app.services.response_planner import describe_result, humanize_column, plan_response
 
 SERIES_COLS = ["order_date", "revenue"]
 SERIES_ROWS = [{"order_date": f"2026-0{i}-01", "revenue": 1000 + i * 250} for i in range(1, 7)]
@@ -366,3 +366,55 @@ def test_a_single_dimension_keeps_one_label():
     ]
     chart = recommend_chart(columns, rows, question="which store earns most")
     assert chart["label_keys"] == ["store"]
+
+
+# --- column names as words --------------------------------------------------
+#
+# A tester on another dataset reported accurate answers that still read like
+# SQL: "avg_stock_level", "return_rate_pct". A reader should never have to
+# parse a column name.
+
+
+@pytest.mark.parametrize(
+    "column,expected",
+    [
+        ("avg_stock_level", "average stock level"),
+        ("min_stock_level", "lowest stock level"),
+        ("max_delivery_days", "highest delivery days"),
+        ("return_rate_pct", "return rate %"),
+        ("roi_pct", "ROI %"),
+        ("margin_pct", "margin %"),
+        ("store_id", "store ID"),
+        ("total_qty", "total quantity"),
+        ("avgStockLevel", "average stock level"),
+        ("revenue", "revenue"),
+    ],
+)
+def test_a_column_name_is_written_as_words(column, expected):
+    assert humanize_column(column) == expected
+
+
+def test_total_is_dropped_when_the_sentence_already_says_it():
+    """"Total total profit" is a stutter; the sentence supplies the word."""
+    assert humanize_column("total_profit", drop_total=True) == "profit"
+    assert humanize_column("total_profit") == "total profit"
+
+
+def test_no_underscore_survives_into_an_answer():
+    columns = ["store", "avg_stock_level", "min_stock_level"]
+    rows = [
+        {"store": "Kano", "avg_stock_level": 23.1, "min_stock_level": 4},
+        {"store": "Lagos", "avg_stock_level": 140.2, "min_stock_level": 60},
+    ]
+    plan = plan_response("which store is low on stock", columns, rows)
+    text = describe_result("which store is low on stock", columns, rows, plan)
+    assert "_" not in text, text
+    assert "average stock level" in text.lower()
+
+
+def test_a_single_record_reads_as_words_too():
+    columns = ["store", "product", "avg_stock_level"]
+    rows = [{"store": "Ibadan", "product": "Home Theater", "avg_stock_level": 378.7}]
+    plan = plan_response("which combination has excess stock", columns, rows)
+    text = describe_result("which combination has excess stock", columns, rows, plan)
+    assert "_" not in text, text

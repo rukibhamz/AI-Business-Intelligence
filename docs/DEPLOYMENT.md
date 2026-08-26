@@ -231,9 +231,27 @@ Run against the live URL, in order:
 instance. Running more than one API instance multiplies the effective limit;
 move to Redis before scaling out.
 
-**Uploads** live on disk under `UPLOAD_DIR`. For more than one instance, or for
-durability beyond a single volume, move them to object storage (Supabase
-Storage / Cloudflare R2) — this is not implemented yet.
+**Uploads** go to **Supabase Storage** when `SUPABASE_SERVICE_ROLE_KEY` and
+`SUPABASE_STORAGE_BUCKET` are set (recommended on Render). Otherwise they land
+only under `UPLOAD_DIR` and disappear when that disk is wiped on redeploy —
+which is the usual cause of “Source file not found”.
+
+### Enable Supabase Storage (one-time)
+
+1. In the Supabase dashboard open **Storage → New bucket**.
+2. Name it `datasets` (or match `SUPABASE_STORAGE_BUCKET`).
+3. Leave it **private** (not public).
+4. Project Settings → API → copy the **`service_role`** key (secret).
+5. On Render (API service) set:
+   - `SUPABASE_URL` — already set for auth
+   - `SUPABASE_SERVICE_ROLE_KEY` — the service_role secret
+   - `SUPABASE_STORAGE_BUCKET=datasets`
+6. Redeploy the API.
+7. **Delete any broken file sources** in the app and **re-upload** them. Old
+   rows that only stored a local `file_path` cannot be recovered after the disk
+   wipe.
+
+Local development can keep using `UPLOAD_DIR=uploads` without Storage.
 
 **External data-source passwords** are stored in the `data_sources` table as
 JSON. They are redacted in every API response, but they are **not encrypted at
@@ -259,7 +277,7 @@ These are open and deliberately not claimed as done:
 | One table analysed per source | Dashboard reads the selected table only; no joins across tables or sources | Multi-table joins in the SQL planner |
 | Targets compared against the whole loaded period | A monthly target read over six months of data reports inflated attainment | Scope target attainment per period |
 | No Alembic | Schema changes rely on `create_all` plus the additive column patch in `database.py`. Column *changes* and drops are not handled. | Adopt Alembic before the schema churns further |
-| Uploads not on object storage | Multi-instance deploys cannot share uploaded files | Supabase Storage or R2 adapter behind the connector interface |
+| Uploads not on object storage | Multi-instance / redeploy loses CSV files | **Done when** `SUPABASE_SERVICE_ROLE_KEY` is set — see §5 |
 | Source passwords unencrypted at rest | DB compromise exposes external DB credentials | Encrypt with a key from the environment |
 | In-process rate limiting | Limit is per instance | Redis-backed limiter |
 | No frontend tests | UI regressions are caught only by typecheck/lint | Vitest + a few component tests |

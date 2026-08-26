@@ -811,9 +811,17 @@
 /* A "why" answer shows its evidence: the size of the move, the segments that
    carry it, and the mechanics behind it. */
 
-.ask-diagnosis {
+.ask-diagnosis,
+.ask-actions {
   display: grid;
   gap: var(--cl-space-md);
+  /* Body sits under the full-bleed header; keep the same horizontal inset. */
+  padding: 0 16px 18px;
+}
+
+.ask-diagnosis > .ask-card-head,
+.ask-actions > .ask-card-head {
+  margin: 0 -16px;
 }
 
 .ask-diag-move {
@@ -821,7 +829,7 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px var(--cl-space-sm);
-  padding: var(--cl-space-md);
+  padding: 14px 16px;
   border-radius: var(--cl-radius-md);
   background: var(--cl-surface-container-low);
 }
@@ -917,7 +925,7 @@
   display: grid;
   gap: 6px;
   margin: 0;
-  padding: 0 0 0 18px;
+  padding: 0 0 0 1.15em;
   color: var(--cl-on-surface-variant);
   font-size: 13px;
   line-height: 20px;
@@ -925,6 +933,7 @@
 
 .ask-diag-note {
   margin: 0;
+  padding-top: 2px;
   color: var(--cl-on-surface-muted);
   font-size: 12px;
   line-height: 18px;

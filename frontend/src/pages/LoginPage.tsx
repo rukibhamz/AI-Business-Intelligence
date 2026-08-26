@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   api,
   describeNetworkFailure,
@@ -32,10 +32,25 @@ export function LoginPage({
   const [showPassword, setShowPassword] = useState(false)
   const [remember, setRemember] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [verifyEmail, setVerifyEmail] = useState<string | null>(null)
 
   const signingUp = mode === 'signup' && canSignUp
+
+  function closeVerifyModal() {
+    setVerifyEmail(null)
+    setMode('signin')
+    setPassword('')
+  }
+
+  useEffect(() => {
+    if (!verifyEmail) return
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') closeVerifyModal()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [verifyEmail])
 
   function readableError(err: unknown): string {
     const message = err instanceof Error ? err.message : 'Sign-in failed'
@@ -61,14 +76,13 @@ export function LoginPage({
     e.preventDefault()
     setBusy(true)
     setError(null)
-    setNotice(null)
     try {
       if (viaSupabase) {
         if (signingUp) {
           const { needsConfirmation } = await signUp(email.trim(), password, fullName.trim())
           if (needsConfirmation) {
-            setNotice('Account created. Check your email for the confirmation link, then sign in.')
-            setMode('signin')
+            setVerifyEmail(email.trim())
+            setPassword('')
             return
           }
         } else {
@@ -120,7 +134,6 @@ export function LoginPage({
 
           <form className="cl-login-form" onSubmit={handleSubmit}>
             {error && <p className="cl-login-error" role="alert">{error}</p>}
-            {notice && <p className="cl-login-notice" role="status">{notice}</p>}
 
             {signingUp && (
               <div className="cl-field">
@@ -218,7 +231,6 @@ export function LoginPage({
                   onClick={() => {
                     setMode(signingUp ? 'signin' : 'signup')
                     setError(null)
-                    setNotice(null)
                   }}
                 >
                   {signingUp ? 'Sign in' : 'Create one'}
@@ -259,6 +271,42 @@ export function LoginPage({
           </ul>
         </div>
       </aside>
+
+      {verifyEmail && (
+        <div
+          className="cl-verify-backdrop"
+          role="presentation"
+          onClick={closeVerifyModal}
+        >
+          <div
+            className="cl-verify-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cl-verify-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="cl-verify-icon" aria-hidden="true">
+              <span className="material-symbols-outlined">mark_email_unread</span>
+            </div>
+            <h2 id="cl-verify-title">Verify your email</h2>
+            <p className="cl-verify-body">
+              We sent a confirmation link to{' '}
+              <strong>{verifyEmail}</strong>. Open it to activate your account,
+              then come back and sign in.
+            </p>
+            <p className="cl-verify-hint">
+              Don’t see it? Check spam or promotions. The link may take a minute
+              to arrive.
+            </p>
+            <button type="button" className="cl-signin-btn" onClick={closeVerifyModal}>
+              Back to sign in
+              <span className="material-symbols-outlined arrow" aria-hidden="true">
+                arrow_forward
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -205,6 +205,11 @@ class Settings(BaseSettings):
     #: Legacy shared JWT secret. Only needed for projects still issuing HS256
     #: tokens; projects on signing keys verify against the JWKS endpoint.
     supabase_jwt_secret: str = ""
+    #: Service role key — server only. Required to put dataset files in Storage.
+    #: Never expose this to the browser or put it in SUPABASE_ANON_KEY.
+    supabase_service_role_key: str = ""
+    #: Private Storage bucket for uploaded CSV/Excel files.
+    supabase_storage_bucket: str = "datasets"
 
     # --- operational limits -------------------------------------------------
     #: Questions per user per minute against the AI query endpoint. Each one can
@@ -236,6 +241,15 @@ class Settings(BaseSettings):
         key, and the API cannot verify what it gets back without the URL.
         """
         return bool(self.supabase_url.strip() and self.supabase_anon_key.strip())
+
+    @property
+    def object_storage_enabled(self) -> bool:
+        """True when dataset uploads should go to Supabase Storage."""
+        return bool(
+            self.supabase_url.strip()
+            and self.supabase_service_role_key.strip()
+            and self.supabase_storage_bucket.strip()
+        )
 
     @property
     def auth_provider(self) -> str:

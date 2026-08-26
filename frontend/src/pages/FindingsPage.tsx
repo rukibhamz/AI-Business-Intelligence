@@ -8,7 +8,7 @@ import {
 } from '../api/client'
 import { EmptyState, InlineMessage, Skeleton, Spinner } from '../components/Feedback'
 import { ResultChart } from '../components/ResultChart'
-import { formatCell, formatRelative } from '../lib/format'
+import { formatCell, formatRelative, humanizeColumn } from '../lib/format'
 import type { AppView } from '../layouts/navigation'
 import './FindingsPage.css'
 
@@ -479,7 +479,7 @@ export function FindingsPage({
                                 <thead>
                                   <tr>
                                     {q.result.columns.map((c) => (
-                                      <th key={c}>{c}</th>
+                                      <th key={c} title={c}>{humanizeColumn(c)}</th>
                                     ))}
                                   </tr>
                                 </thead>

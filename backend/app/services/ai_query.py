@@ -553,10 +553,13 @@ async def _exec_mysql(source: DataSource, sql: str) -> dict[str, Any]:
 
 
 def _exec_file_sqlite(source: DataSource, sql: str) -> dict[str, Any]:
+    from app.services.object_storage import ensure_local_file
+
     config = parse_connection_config(source)
-    path = Path(config["file_path"])
-    if not path.exists():
-        raise ValueError("Source file not found on disk")
+    try:
+        path = ensure_local_file(config)
+    except FileNotFoundError as exc:
+        raise ValueError(str(exc)) from exc
 
     table = Path(config.get("original_name", path.name)).stem
     table = re.sub(r"[^A-Za-z0-9_]", "_", table) or "data"

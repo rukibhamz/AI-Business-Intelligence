@@ -62,9 +62,14 @@ services:
         sync: false
       - key: SUPABASE_JWT_SECRET
         sync: false
+      # Durable CSV/Excel uploads (private Storage bucket). Never put this in
+      # the browser or in SUPABASE_ANON_KEY.
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: datasets
 
-    # Uncomment together with `plan: starter` to keep uploaded files across
-    # deploys, and set UPLOAD_DIR to /data/uploads.
+    # Optional: local disk volume. Prefer Supabase Storage (above) on free tier.
     # disk:
     #   name: uploads
     #   mountPath: /data

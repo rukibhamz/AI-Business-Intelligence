@@ -30,6 +30,13 @@ from app.services.field_mapping import (
     enrich_config_with_mapping,
     resolve_conflicts,
 )
+from app.services.object_storage import (
+    cache_path_for,
+    content_type_for,
+    remove_dataset_files,
+    storage_enabled,
+    upload_bytes,
+)
 from app.services.ownership import fetch_owned, owned_by
 from app.services.profiling import PROFILE_SAMPLE_ROWS, attach_profiles, profile_rows
 from app.services.schema_context import pick_primary_table
@@ -248,13 +255,38 @@ async def upload_source(
 
     upload_dir = Path(settings.upload_dir)
     dest, _ = save_upload(upload_dir, file.filename, content)
+    storage_key: str | None = None
 
-    config = {
+    config: dict[str, Any] = {
         "file_path": str(dest),
         "original_name": file.filename,
         "format": file_format,
         "mapping_status": "pending",
     }
+
+    if storage_enabled():
+        # Durable copy so redeploys on Render/etc. do not lose the dataset.
+        storage_key = f"user_{current_user.id}/{dest.name}"
+        try:
+            upload_bytes(
+                storage_key,
+                content,
+                content_type=content_type_for(file.filename, file_format),
+            )
+        except Exception as exc:
+            dest.unlink(missing_ok=True)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Could not store file in Supabase Storage: {exc}",
+            ) from exc
+        config["storage_backend"] = "supabase"
+        config["storage_key"] = storage_key
+        config["storage_bucket"] = settings.supabase_storage_bucket.strip()
+        # Mirror into the local cache path used on subsequent reads.
+        cached = cache_path_for(storage_key)
+        cached.write_bytes(content)
+        config["file_path"] = str(cached)
+        dest.unlink(missing_ok=True)
 
     source = DataSource(
         user_id=current_user.id,
@@ -269,7 +301,7 @@ async def upload_source(
         await _apply_schema_and_mapping(source, reset_mapping=True, db=db)
     except Exception as exc:
         await db.rollback()
-        dest.unlink(missing_ok=True)
+        remove_dataset_files(config)
         raise HTTPException(status_code=400, detail=f"Failed to parse file: {exc}") from exc
 
     await db.commit()
@@ -511,9 +543,7 @@ async def delete_source(
 
     if source.source_type == "file":
         config = parse_connection_config(source)
-        file_path = config.get("file_path")
-        if file_path:
-            Path(file_path).unlink(missing_ok=True)
+        remove_dataset_files(config)
 
 
 @router.get("/{source_id}/preview", response_model=PreviewResponse)

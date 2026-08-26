@@ -12,7 +12,7 @@ import {
   type ResponseFormat,
 } from '../api/client'
 import { ResultChart } from '../components/ResultChart'
-import { formatCell, formatValue } from '../lib/format'
+import { formatCell, formatValue, humanizeColumn } from '../lib/format'
 import { getSessionId, startNewSession } from '../lib/session'
 import './AskAiPage.css'
 
@@ -757,7 +757,9 @@ export function AskAiPage({
                   <thead>
                     <tr>
                       {cols.map((col) => (
-                        <th key={col}>{col}</th>
+                        // The header is read by a person; the column name is
+                        // how the query happens to spell it.
+                        <th key={col} title={col}>{humanizeColumn(col)}</th>
                       ))}
                     </tr>
                   </thead>

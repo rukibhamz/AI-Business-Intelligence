@@ -129,6 +129,45 @@ def _numeric_columns(columns: list[str], rows: list[dict[str, Any]]) -> list[str
     return out
 
 
+#: Abbreviations that turn up in generated SQL, and what they mean in a
+#: sentence. A reader should never have to parse `avg_stock_level`.
+_COLUMN_WORDS = {
+    "avg": "average",
+    "average": "average",
+    "min": "lowest",
+    "minimum": "lowest",
+    "max": "highest",
+    "maximum": "highest",
+    "qty": "quantity",
+    "num": "number of",
+    "cnt": "count of",
+    "pct": "%",
+    "percent": "%",
+    "pc": "%",
+    "roi": "ROI",
+    "aov": "average order value",
+    "yoy": "year on year",
+    "mom": "month on month",
+    "id": "ID",
+    "sku": "SKU",
+    "vip": "VIP",
+    "sme": "SME",
+}
+
+#: Words that add nothing once the sentence already says "total".
+_COLUMN_NOISE = ("total",)
+
+
+def humanize_column(name: str, *, drop_total: bool = False) -> str:
+    """`avg_stock_level` -> `average stock level`; `roi_pct` -> `ROI %`."""
+    raw = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(name or ""))
+    words = [w for w in re.split(r"[\s_]+", raw) if w]
+    if drop_total and len(words) > 1 and words[0].lower() in _COLUMN_NOISE:
+        words = words[1:]
+    spoken = [_COLUMN_WORDS.get(w.lower(), w.lower()) for w in words]
+    return re.sub(r"\s+%", " %", " ".join(spoken)).strip() or str(name)
+
+
 def _fmt(value: float) -> str:
     if abs(value - round(value)) < 0.005:
         return f"{round(value):,}"
@@ -262,11 +301,11 @@ def describe_result(
         col = numeric[0]
         value = _to_number(rows[0].get(col))
         if value is not None:
-            label = col.replace("_", " ")
+            label = humanize_column(col)
             return f"{label.capitalize()} is {_fmt(value)}{where}."
 
     if len(rows) == 1 and fmt in ("table", "narrative"):
-        parts = [f"{c.replace('_', ' ')} {rows[0].get(c)}" for c in columns[:4]]
+        parts = [f"{humanize_column(c)} {rows[0].get(c)}" for c in columns[:4]]
         return f"One matching record{where}: {', '.join(parts)}."
 
     label_key = plan.get("chart", {}).get("label_key") if plan.get("chart") else None
@@ -304,7 +343,7 @@ def describe_result(
             ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
             top_label, top_value = ranked[0]
             # "Total total_profit" reads as a stutter; the column already says it.
-            measure_label = re.sub(r"^total[ _]", "", measure).replace("_", " ")
+            measure_label = humanize_column(measure, drop_total=True)
             ratio = is_ratio_column(measure)
 
             if len(ranked) == 1:
@@ -345,7 +384,7 @@ def describe_result(
                 if len(by_companion) > 1:
                     ordered = sorted(by_companion.items(), key=lambda kv: kv[1], reverse=True)
                     sentences.append(
-                        f"On {companion.replace('_', ' ')}, {ordered[0][0]} leads at "
+                        f"On {humanize_column(companion)}, {ordered[0][0]} leads at "
                         f"{_fmt(ordered[0][1])} and {ordered[-1][0]} trails at "
                         f"{_fmt(ordered[-1][1])}."
                     )
@@ -358,7 +397,7 @@ def describe_result(
             if str(row.get(key, "")).strip()
         ]
         if values:
-            label = key.replace("_", " ")
+            label = humanize_column(key)
             if len(values) == 1:
                 joined = values[0]
             else:
@@ -391,6 +430,7 @@ Rules:
   when the rows carry the measure asked about.
 - Only say the rows cannot answer the question when the measure it asks about is
   genuinely absent from them.
+- Write column names as words: "average stock level", never avg_stock_level.
 - The rows are what one query returned, not the whole dataset. Never write that
   something is "the only one" or that "there are no others to compare" — the
   query may simply have asked for a single row. Describe what is there without

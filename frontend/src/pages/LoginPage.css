@@ -126,6 +126,77 @@
   line-height: 20px;
 }
 
+/* ---- verify email modal ---- */
+.cl-verify-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: var(--cl-space-lg);
+  background: color-mix(in srgb, var(--cl-on-surface) 42%, transparent);
+  backdrop-filter: blur(2px);
+}
+
+.cl-verify-modal {
+  width: min(100%, 26rem);
+  padding: 28px 24px 24px;
+  border: 1px solid var(--cl-border);
+  border-radius: var(--cl-radius-lg);
+  background: var(--cl-surface-container-lowest);
+  box-shadow: var(--cl-shadow-level-3);
+  text-align: center;
+}
+
+.cl-verify-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin: 0 auto 16px;
+  border-radius: var(--cl-radius-full);
+  background: var(--cl-accent-quiet);
+  color: var(--cl-accent-strong);
+}
+
+.cl-verify-icon .material-symbols-outlined {
+  font-size: 26px;
+}
+
+.cl-verify-modal h2 {
+  margin: 0 0 10px;
+  font-family: var(--cl-font-metric);
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 28px;
+  letter-spacing: -0.03em;
+  color: var(--cl-on-surface);
+}
+
+.cl-verify-body {
+  margin: 0 0 10px;
+  font-size: 14.5px;
+  line-height: 22px;
+  color: var(--cl-on-surface-variant);
+}
+
+.cl-verify-body strong {
+  color: var(--cl-on-surface);
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.cl-verify-hint {
+  margin: 0 0 22px;
+  font-size: 12.5px;
+  line-height: 18px;
+  color: var(--cl-on-surface-muted);
+}
+
+.cl-verify-modal .cl-signin-btn {
+  margin-top: 0;
+}
+
 .cl-field {
   display: flex;
   flex-direction: column;

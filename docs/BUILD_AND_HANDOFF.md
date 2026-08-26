@@ -41,7 +41,7 @@ AI-Business-Intelligence/
 | Field | Value |
 |-------|-------|
 | **Last updated** | 2026-08-26 |
-| **Last agent/session** | Question planner + SQL repair loop + narrative fluency |
+| **Last agent/session** | Supabase Storage for durable uploads + Ask AI card padding |
 | **Active phase** | Phase 6 — mostly complete (see §3 Phase 6 table) |
 | **Phase status** | Phases 1–5 validated against the code; deploy artifacts in place |
 | **Blockers** | None for a soft launch. Open gaps listed in `docs/DEPLOYMENT.md` §6 |
@@ -213,6 +213,14 @@ AI-Business-Intelligence/
       is drawn as horizontal bars, which give every label its own row. Series
       names are written out — "Average stock level", not `avg_stock_level` —
       in the legend, the tooltip and the overview charts
+- [x] **Column names are written as words everywhere a person reads them** — a
+      tester on another dataset got accurate answers that still read like SQL.
+      `humanize_column` (backend) and `humanizeColumn` (frontend) expand the
+      abbreviations generated queries actually use — avg → average, min →
+      lowest, pct → %, roi → ROI — and are applied to the narrative, the result
+      table headers on Analysis and Findings, chart legends and tooltips. The
+      raw name stays in the header's tooltip for anyone matching it to the SQL,
+      and CSV exports keep the original names because that is data, not prose
 - [x] **Verified against the real NexaSphere dataset** — all ten ground-truth
       questions, 9 exact matches plus one (campaign ROI) correct in ranking and
       reported as net return rather than gross
@@ -323,15 +331,21 @@ AI-Business-Intelligence/
       Mode is reported as `openai+repair` when a repair was used.
 - [x] **Narrative fluency** — manager-brief tone in `NARRATIVE_SYSTEM`; slightly
       higher temperature/token budget so answers read as speech, not field dumps
+- [x] **Supabase Storage for datasets** (`services/object_storage.py`) — when
+      `SUPABASE_SERVICE_ROLE_KEY` + `SUPABASE_STORAGE_BUCKET` are set, file
+      uploads go to a private bucket and are cached locally on read. Fixes
+      “file not found” after Render redeploys. Existing local-only sources must
+      be re-uploaded once Storage is enabled (see `docs/DEPLOYMENT.md` §5).
+- [x] **Ask AI diagnosis card padding** — body content inset to match the header
 
 > **Existing sources need a one-off recompute** to gain profiles — open Data
 > Sources and press **Recompute** (new uploads profile automatically).
 
 ### 2.3 What To Do Next
 
-1. **Deploy:** follow `docs/DEPLOYMENT.md` — it is the runbook, §6 below is the
-   hosting rationale
-2. Remaining Phase 6 work: Alembic (6.2) and object storage for uploads
+1. **Deploy:** follow `docs/DEPLOYMENT.md` — set `SUPABASE_SERVICE_ROLE_KEY` and
+   create the `datasets` bucket, then re-upload any broken file sources
+2. Remaining Phase 6 work: Alembic (6.2)
 3. Close the gaps in `docs/DEPLOYMENT.md` §6 before treating this as production-grade
 4. Optional accuracy follow-ups: SQL result shape check vs plan slots; richer
    offline planner coverage without an API key

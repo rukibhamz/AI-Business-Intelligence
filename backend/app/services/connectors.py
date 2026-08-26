@@ -269,9 +269,12 @@ def save_upload(upload_dir: Path, filename: str, content: bytes) -> tuple[Path, 
 
 
 def build_file_connector(config: dict[str, Any]) -> FileConnector:
+    from app.services.object_storage import ensure_local_file
+
+    path = ensure_local_file(config)
     return FileConnector(
-        file_path=Path(config["file_path"]),
-        original_name=config.get("original_name", Path(config["file_path"]).name),
+        file_path=path,
+        original_name=config.get("original_name", path.name),
         file_format=config.get("format", "csv"),
     )
 
