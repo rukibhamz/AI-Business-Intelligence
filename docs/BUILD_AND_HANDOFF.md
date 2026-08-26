@@ -205,6 +205,14 @@ AI-Business-Intelligence/
       holds more than one provider, retried against the next one in priority
       order — which is what that ordering was always for. If every provider is
       busy the answer says so plainly
+- [x] **Charts are readable at a glance** — a store/product answer labelled every
+      bar by store alone, printing "Lagos" three times with no way to tell them
+      apart, and the vertical axis silently dropped 16 of 20 names because they
+      did not fit. A result identified by two columns is now labelled by both
+      ("Ibadan · Home Theater System"), and a crowded or long-labelled ranking
+      is drawn as horizontal bars, which give every label its own row. Series
+      names are written out — "Average stock level", not `avg_stock_level` —
+      in the legend, the tooltip and the overview charts
 - [x] **Verified against the real NexaSphere dataset** — all ten ground-truth
       questions, 9 exact matches plus one (campaign ROI) correct in ranking and
       reported as net return rather than gross

@@ -151,6 +151,8 @@ export interface QueryRecord {
 export interface ChartRecommendation {
   type: string
   label_key: string | null
+  /** Columns that together identify a bar — both halves of a store/product pair. */
+  label_keys?: string[]
   value_keys: string[]
   reason: string | null
 }
@@ -456,6 +458,60 @@ async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
   return request<T>(path, { ...options, headers })
 }
 
+/** Upload progress 0–100 for the bytes on the wire. */
+export type UploadProgressHandler = (percent: number) => void
+
+/**
+ * POST multipart/form-data with upload progress.
+ * fetch() cannot report upload progress; XHR can.
+ */
+async function uploadForm<T>(
+  path: string,
+  form: FormData,
+  onProgress?: UploadProgressHandler,
+): Promise<T> {
+  const token = await tokenSource()
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', `${API_BASE}${path}`)
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+
+    xhr.upload.onprogress = (event) => {
+      if (!onProgress || !event.lengthComputable || event.total <= 0) return
+      const pct = Math.min(100, Math.round((event.loaded / event.total) * 100))
+      onProgress(pct)
+    }
+    xhr.upload.onload = () => {
+      // Bytes are on the server; profiling / mapping may still be running.
+      onProgress?.(100)
+    }
+
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        onUnauthorized()
+        reject(new Error('UNAUTHORIZED'))
+        return
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(
+          new Error(
+            formatApiError(xhr.responseText || '', `Request failed: ${xhr.status}`),
+          ),
+        )
+        return
+      }
+      try {
+        resolve(JSON.parse(xhr.responseText) as T)
+      } catch {
+        reject(new Error('Invalid response from server'))
+      }
+    }
+    xhr.onerror = () => reject(new Error('Network error during upload'))
+    xhr.onabort = () => reject(new Error('Upload cancelled'))
+    xhr.send(form)
+  })
+}
+
 export const api = {
   health: () => requestJson<HealthResponse>('/health'),
   authConfig: () => requestJson<AuthConfig>('/auth/config'),
@@ -466,11 +522,11 @@ export const api = {
     }),
   me: () => requestJson<User>('/auth/me'),
   listSources: () => requestJson<DataSource[]>('/sources'),
-  uploadSource: (name: string, file: File) => {
+  uploadSource: (name: string, file: File, onProgress?: UploadProgressHandler) => {
     const form = new FormData()
     form.append('name', name)
     form.append('file', file)
-    return request<DataSource>('/sources/upload', { method: 'POST', body: form })
+    return uploadForm<DataSource>('/sources/upload', form, onProgress)
   },
   createMysqlSource: (name: string, connection_config: MySQLConnectionConfig) =>
     requestJson<DataSource>('/sources/mysql', {

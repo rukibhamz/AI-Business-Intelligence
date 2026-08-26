@@ -343,3 +343,26 @@ def test_the_narrative_does_not_stutter_on_a_total_column():
     text = describe_result("which employee performs best", columns, rows, plan)
     assert "Total total" not in text
     assert "Total profit is" in text
+
+
+def test_a_combination_is_labelled_by_both_of_its_columns():
+    """Store/product pairs labelled by store alone print Lagos three times."""
+    columns = ["store", "product", "avg_stock_level"]
+    rows = [
+        {"store": "Ibadan", "product": "Home Theater System", "avg_stock_level": 378.7},
+        {"store": "Port Harcourt", "product": "Gas Cooker 4-Burner", "avg_stock_level": 162.9},
+        {"store": "Lagos", "product": "Blender Pro", "avg_stock_level": 157.8},
+        {"store": "Lagos", "product": "Smart TV 43-inch", "avg_stock_level": 150.1},
+    ]
+    chart = recommend_chart(columns, rows, question="which store/product has excess inventory")
+    assert chart["label_keys"] == ["store", "product"]
+
+
+def test_a_single_dimension_keeps_one_label():
+    columns = ["store", "total_revenue"]
+    rows = [
+        {"store": "Lagos", "total_revenue": 125_962_100},
+        {"store": "Ibadan", "total_revenue": 88_897_100},
+    ]
+    chart = recommend_chart(columns, rows, question="which store earns most")
+    assert chart["label_keys"] == ["store"]

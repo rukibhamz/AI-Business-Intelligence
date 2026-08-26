@@ -117,6 +117,15 @@ const CHART_TITLE: Record<string, string> = {
   pie: 'Breakdown',
   line: 'Trend',
   bar: 'Comparison',
+  hbar: 'Ranking',
+}
+
+/** What the card says under the title — "hbar chart" means nothing to a reader. */
+const CHART_KIND: Record<string, string> = {
+  pie: 'share of total',
+  line: 'over time',
+  bar: 'bar chart',
+  hbar: 'ranked bars',
 }
 
 /**
@@ -722,7 +731,9 @@ export function AskAiPage({
               <header className="ask-card-head">
                 <h4>{CHART_TITLE[chart?.type ?? 'bar'] ?? 'Visualization'}</h4>
                 <span className="ask-card-meta">
-                  {format === 'narrative' ? 'supporting view' : `${chart?.type} chart`}
+                  {format === 'narrative'
+                    ? 'supporting view'
+                    : (CHART_KIND[chart?.type ?? 'bar'] ?? 'chart')}
                 </span>
               </header>
               <ResultChart result={result} chart={msg.query?.chart} height={240} />

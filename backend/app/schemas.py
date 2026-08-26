@@ -136,6 +136,9 @@ class QueryResultPayload(BaseModel):
 class ChartRecommendation(BaseModel):
     type: str
     label_key: str | None = None
+    #: The columns that together identify a bar. More than one when the result
+    #: is a combination — a store/product pair needs both to be readable.
+    label_keys: list[str] = []
     value_keys: list[str] = []
     reason: str | None = None
 

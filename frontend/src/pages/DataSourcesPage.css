@@ -125,6 +125,72 @@
   color: var(--cl-outline) !important;
 }
 
+.ds-upload.is-busy {
+  cursor: wait;
+  pointer-events: none;
+}
+
+.ds-progress {
+  width: min(360px, 100%);
+  margin-top: 20px;
+  text-align: left;
+  pointer-events: auto;
+}
+
+.ds-progress--form {
+  width: 100%;
+  margin-top: 4px;
+  align-self: stretch;
+}
+
+.ds-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--cl-on-surface-variant);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.ds-progress-pct {
+  font-variant-numeric: tabular-nums;
+  color: var(--cl-accent-strong);
+}
+
+.ds-progress-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: var(--cl-radius-full);
+  background: var(--cl-surface-container-high);
+}
+
+.ds-progress-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: var(--cl-accent);
+  transition: width 120ms linear;
+}
+
+.ds-progress-fill.is-indeterminate {
+  width: 40%;
+  animation: ds-progress-slide 1.1s var(--cl-ease) infinite;
+}
+
+@keyframes ds-progress-slide {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
 .ds-mysql-toggle {
   margin-top: -8px;
 }

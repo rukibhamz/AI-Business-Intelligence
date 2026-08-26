@@ -107,3 +107,48 @@ export function formatCell(value: unknown): string {
   }
   return String(value)
 }
+
+/**
+ * Turn a SQL column name into something a reader recognises.
+ *
+ * A legend reading `avg_stock_level` / `min_stock_level` asks the reader to
+ * parse SQL to understand a picture. These are the abbreviations that actually
+ * show up in generated queries.
+ */
+const COLUMN_WORDS: Record<string, string> = {
+  avg: 'average',
+  average: 'average',
+  min: 'lowest',
+  minimum: 'lowest',
+  max: 'highest',
+  maximum: 'highest',
+  qty: 'quantity',
+  num: 'number of',
+  cnt: 'count of',
+  pct: '%',
+  percent: '%',
+  roi: 'ROI',
+  aov: 'average order value',
+  yoy: 'year on year',
+  mom: 'month on month',
+  id: 'ID',
+  sku: 'SKU',
+  vip: 'VIP',
+  sme: 'SME',
+}
+
+/** `avg_stock_level` → `Average stock level`; `roi_pct` → `ROI %`. */
+export function humanizeColumn(name: string): string {
+  const words = String(name || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[\s_]+/)
+    .filter(Boolean)
+    .map((word) => COLUMN_WORDS[word.toLowerCase()] ?? word.toLowerCase())
+
+  if (words.length === 0) return name
+  const text = words.join(' ').replace(/\s+%/g, ' %').trim()
+  // Keep acronyms as they are; sentence-case everything else.
+  const first = words[0]
+  const head = first === first.toUpperCase() && first.length > 1 ? first : first.charAt(0).toUpperCase() + first.slice(1)
+  return [head, ...words.slice(1)].join(' ').replace(/\s+%/g, ' %').trim() || text
+}

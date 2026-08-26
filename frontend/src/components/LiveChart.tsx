@@ -12,7 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { OverviewChart } from '../api/client'
-import { formatExact, formatValue } from '../lib/format'
+import { formatExact, formatValue, humanizeColumn } from '../lib/format'
 import './LiveChart.css'
 
 export const CHART_COLORS = [
@@ -97,6 +97,7 @@ export function LiveChart({ chart, height = 260 }: { chart: OverviewChart; heigh
               <Bar
                 key={key}
                 dataKey={key}
+                name={humanizeColumn(key)}
                 radius={[0, 4, 4, 0]}
                 maxBarSize={valueKeys.length > 1 ? 14 : 22}
                 fill={CHART_COLORS[series % CHART_COLORS.length]}
@@ -160,6 +161,7 @@ export function LiveChart({ chart, height = 260 }: { chart: OverviewChart; heigh
                 key={key}
                 type="monotone"
                 dataKey={key}
+                name={humanizeColumn(key)}
                 stroke={CHART_COLORS[i % CHART_COLORS.length]}
                 strokeWidth={2}
                 fill={`url(#grad-${chart.id}-${i})`}
@@ -212,6 +214,7 @@ export function LiveChart({ chart, height = 260 }: { chart: OverviewChart; heigh
             <Bar
               key={key}
               dataKey={key}
+              name={humanizeColumn(key)}
               radius={[4, 4, 0, 0]}
               maxBarSize={44}
               fill={CHART_COLORS[i % CHART_COLORS.length]}

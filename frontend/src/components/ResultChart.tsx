@@ -14,6 +14,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { ChartRecommendation, QueryResult } from '../api/client'
+import { humanizeColumn } from '../lib/format'
 import { CHART_COLORS as COLORS } from './LiveChart'
 import './ResultChart.css'
 
@@ -54,14 +55,22 @@ export function ResultChart({ result, chart, chartType, height = 220 }: Props) {
   if (type === 'table' || !result.rows.length) return null
 
   const labelKey = chart?.label_key || result.columns[0]
+  // A store/product answer needs both columns in the label, or the axis reads
+  // "Lagos, Lagos, Lagos" with no way to tell the bars apart.
+  const labelKeys = chart?.label_keys?.length ? chart.label_keys : [labelKey]
   const valueKeys =
     chart?.value_keys?.length
       ? chart.value_keys
-      : result.columns.filter((c) => c !== labelKey).slice(0, 2)
+      : result.columns.filter((c) => !labelKeys.includes(c)).slice(0, 2)
 
   if (!labelKey || valueKeys.length === 0) return null
 
   const rows = result.rows.slice(0, 40)
+  const labelOf = (row: Record<string, unknown>) =>
+    labelKeys
+      .map((key) => String(row[key] ?? '').trim())
+      .filter(Boolean)
+      .join(' · ')
 
   // A line chart implies time order. The SQL may be sorted by a measure
   // instead (e.g. ORDER BY revenue DESC), which would draw a meaningless
@@ -72,14 +81,61 @@ export function ResultChart({ result, chart, chartType, height = 220 }: Props) {
       : rows
 
   const data = ordered.map((row) => {
-    const item: Record<string, string | number> = {
-      [labelKey]: String(row[labelKey] ?? ''),
-    }
+    const item: Record<string, string | number> = { [labelKey]: labelOf(row) }
     for (const key of valueKeys) {
       item[key] = toNumber(row[key])
     }
     return item
   })
+
+  if (type === 'hbar') {
+    // One row per label: readable at twenty categories, where a vertical axis
+    // drops most of the names. The card grows rather than squeezing them.
+    const rowHeight = 26
+    const chartHeight = Math.max(height, data.length * rowHeight + 48)
+    return (
+      <div className="result-chart" style={{ height: chartHeight }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, bottom: 4, left: 4 }}>
+            <CartesianGrid horizontal={false} strokeDasharray="3 3" stroke="var(--cl-chart-grid)" />
+            <XAxis type="number" tick={{ fontSize: 11, fill: 'var(--cl-chart-axis)' }}
+              tickLine={false} axisLine={false} />
+            <YAxis
+              type="category"
+              dataKey={labelKey}
+              tick={{ fontSize: 11, fill: 'var(--cl-chart-axis)' }}
+              tickLine={false}
+              axisLine={false}
+              width={168}
+              interval={0}
+              tickFormatter={(v: unknown) => {
+                const text = String(v ?? '')
+                return text.length > 26 ? `${text.slice(0, 25)}…` : text
+              }}
+            />
+            <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'var(--cl-accent-quiet)' }} />
+            {valueKeys.length > 1 && (
+              <Legend
+                iconType="circle"
+                iconSize={8}
+                wrapperStyle={{ fontSize: 12, fontFamily: 'var(--cl-font-body)', paddingTop: 4 }}
+              />
+            )}
+            {valueKeys.map((key, i) => (
+              <Bar
+                key={key}
+                dataKey={key}
+                name={humanizeColumn(key)}
+                fill={COLORS[i % COLORS.length]}
+                radius={[0, 2, 2, 0]}
+                maxBarSize={valueKeys.length > 1 ? 9 : 16}
+              />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    )
+  }
 
   if (type === 'pie') {
     const key = valueKeys[0]
@@ -128,6 +184,7 @@ export function ResultChart({ result, chart, chartType, height = 220 }: Props) {
                 key={key}
                 type="monotone"
                 dataKey={key}
+                name={humanizeColumn(key)}
                 stroke={COLORS[i % COLORS.length]}
                 strokeWidth={2}
                 dot={false}
@@ -159,7 +216,13 @@ export function ResultChart({ result, chart, chartType, height = 220 }: Props) {
             />
           )}
           {valueKeys.map((key, i) => (
-            <Bar key={key} dataKey={key} fill={COLORS[i % COLORS.length]} radius={[2, 2, 0, 0]} />
+            <Bar
+              key={key}
+              dataKey={key}
+              name={humanizeColumn(key)}
+              fill={COLORS[i % COLORS.length]}
+              radius={[2, 2, 0, 0]}
+            />
           ))}
         </BarChart>
       </ResponsiveContainer>

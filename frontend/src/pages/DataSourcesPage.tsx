@@ -58,6 +58,11 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
   const [mysqlName, setMysqlName] = useState('')
   const [mysqlConfig, setMysqlConfig] = useState<MySQLConnectionConfig>(defaultMysql)
   const [dragOver, setDragOver] = useState(false)
+  const [progress, setProgress] = useState<{
+    kind: 'upload' | 'connect'
+    percent: number | null
+    label: string
+  } | null>(null)
 
   const mappingSource = sources.find((s) => s.id === mappingSourceId) ?? null
 
@@ -102,9 +107,21 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
     setBusy(true)
     setError(null)
     setOkMsg(null)
+    setProgress({ kind: 'upload', percent: 0, label: 'Uploading…' })
     try {
       const name = file.name.replace(/\.[^.]+$/, '') || 'Dataset'
-      const created = await api.uploadSource(name, file)
+      const created = await api.uploadSource(name, file, (pct) => {
+        if (pct < 100) {
+          setProgress({ kind: 'upload', percent: pct, label: `Uploading… ${pct}%` })
+        } else {
+          setProgress({
+            kind: 'upload',
+            percent: null,
+            label: 'Processing file and mapping fields…',
+          })
+        }
+      })
+      setProgress({ kind: 'upload', percent: null, label: 'Refreshing sources…' })
       await onRefresh()
       if (created.mapping_source === 'ai' && created.mapping_status === 'confirmed') {
         const fields = Object.values(created.field_mapping ?? {}).filter(
@@ -123,6 +140,7 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
       setError(err instanceof Error ? err.message : 'Upload failed')
     } finally {
       setBusy(false)
+      setProgress(null)
       if (fileRef.current) fileRef.current.value = ''
     }
   }
@@ -228,11 +246,21 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
     if (!mysqlName.trim()) return
     setBusy(true)
     setError(null)
+    setOkMsg(null)
+    setProgress({ kind: 'connect', percent: null, label: 'Connecting to MySQL…' })
+    const stageTimer = window.setTimeout(() => {
+      setProgress({
+        kind: 'connect',
+        percent: null,
+        label: 'Reading schema and mapping fields…',
+      })
+    }, 1200)
     try {
       const created = await api.createMysqlSource(mysqlName.trim(), mysqlConfig)
+      setProgress({ kind: 'connect', percent: null, label: 'Refreshing sources…' })
+      await onRefresh()
       setMysqlName('')
       setShowMysql(false)
-      await onRefresh()
       if (created.mapping_source === 'ai' && created.mapping_status === 'confirmed') {
         setOkMsg(`Connected “${created.name}” — the AI mapped its columns.`)
       } else {
@@ -242,7 +270,9 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'MySQL connection failed')
     } finally {
+      window.clearTimeout(stageTimer)
       setBusy(false)
+      setProgress(null)
     }
   }
 
@@ -294,17 +324,27 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
       <div className="ds-grid">
         <div className="ds-main">
           <section
-            className={`ds-upload${dragOver ? ' is-drag' : ''}`}
+            className={`ds-upload${dragOver ? ' is-drag' : ''}${busy ? ' is-busy' : ''}`}
             onDragOver={(e) => {
               e.preventDefault()
-              setDragOver(true)
+              if (!busy) setDragOver(true)
             }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => void handleDrop(e)}
-            onClick={() => fileRef.current?.click()}
+            onDrop={(e) => {
+              if (busy) {
+                e.preventDefault()
+                return
+              }
+              void handleDrop(e)
+            }}
+            onClick={() => {
+              if (!busy) fileRef.current?.click()
+            }}
             role="button"
-            tabIndex={0}
+            tabIndex={busy ? -1 : 0}
+            aria-busy={busy || undefined}
             onKeyDown={(e) => {
+              if (busy) return
               if (e.key === 'Enter' || e.key === ' ') fileRef.current?.click()
             }}
           >
@@ -314,11 +354,42 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
             <h3>Upload a business dataset</h3>
             <p>Sales, employees, inventory, deliveries, or marketing data</p>
             <p className="ds-upload-caps">.csv or .xlsx supported</p>
+            {progress?.kind === 'upload' && (
+              <div
+                className="ds-progress"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={progress.percent ?? undefined}
+                aria-valuetext={progress.label}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="ds-progress-meta">
+                  <span>{progress.label}</span>
+                  {progress.percent != null && (
+                    <span className="ds-progress-pct">{progress.percent}%</span>
+                  )}
+                </div>
+                <div className="ds-progress-track">
+                  <div
+                    className={`ds-progress-fill${
+                      progress.percent == null ? ' is-indeterminate' : ''
+                    }`}
+                    style={
+                      progress.percent != null
+                        ? { width: `${progress.percent}%` }
+                        : undefined
+                    }
+                  />
+                </div>
+              </div>
+            )}
             <input
               ref={fileRef}
               type="file"
               accept=".csv,.xlsx"
               hidden
+              disabled={busy}
               onChange={(e) => {
                 const f = e.target.files?.[0]
                 if (f) void uploadFile(f)
@@ -374,8 +445,22 @@ export function DataSourcesPage({ sources, onRefresh }: Props) {
                 />
               </label>
               <button type="submit" disabled={busy || !mysqlName.trim()}>
-                Connect MySQL
+                {busy && progress?.kind === 'connect' ? 'Connecting…' : 'Connect MySQL'}
               </button>
+              {progress?.kind === 'connect' && (
+                <div
+                  className="ds-progress ds-progress--form"
+                  role="progressbar"
+                  aria-valuetext={progress.label}
+                >
+                  <div className="ds-progress-meta">
+                    <span>{progress.label}</span>
+                  </div>
+                  <div className="ds-progress-track">
+                    <div className="ds-progress-fill is-indeterminate" />
+                  </div>
+                </div>
+              )}
             </form>
           )}
 

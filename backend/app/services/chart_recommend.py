@@ -135,7 +135,13 @@ def recommend_chart(
     asks are not forced into a time-series line.
     """
     if not columns or not rows:
-        return {"type": "table", "label_key": None, "value_keys": [], "reason": "empty"}
+        return {
+            "type": "table",
+            "label_key": None,
+            "label_keys": [],
+            "value_keys": [],
+            "reason": "empty",
+        }
 
     numeric: list[str] = []
     categorical: list[str] = []
@@ -151,11 +157,21 @@ def recommend_chart(
         return {
             "type": "table",
             "label_key": columns[0],
+            "label_keys": [columns[0]],
             "value_keys": [],
             "reason": "no_numeric_columns",
         }
 
     label_key = categorical[0] if categorical else columns[0]
+
+    # "Which store/product combination" returns two categorical columns, and
+    # labelling by the first alone prints Lagos three times with no way to tell
+    # the bars apart. When the leading column repeats, the label is the pair.
+    label_keys = [label_key]
+    if len(categorical) > 1:
+        leading = [str(row.get(label_key, "")) for row in rows]
+        if len(set(leading)) < len(rows):
+            label_keys = categorical[:2]
     preferred = ("revenue", "amount", "total", "sales", "value", "count", "profit", "margin")
     answer_column = ordered_measure(sql, columns)
     if answer_column not in numeric:
@@ -189,6 +205,15 @@ def recommend_chart(
     n = len(rows)
     chart_type = "bar"
     reason = "category_vs_metric"
+
+    # Vertical bars only fit a handful of short labels: beyond that the axis
+    # silently drops most of them, so the reader sees twenty bars and four
+    # names that do not line up. Horizontal bars give every label its own row.
+    longest_label = max(
+        (len(" · ".join(str(row.get(k, "")) for k in label_keys)) for row in rows),
+        default=0,
+    )
+    crowded = n > 8 or longest_label > 16
     temporal = bool(categorical) and _looks_temporal(label_key, rows)
     q = f" {(question or '').lower().strip()} "
     forced = _forced_chart_type(q)
@@ -201,6 +226,9 @@ def recommend_chart(
     if temporal and not wants_comparison and forced not in ("bar", "pie"):
         chart_type = "line" if n >= 3 else "bar"
         reason = "temporal_series" if chart_type == "line" else "few_periods"
+    elif crowded and categorical:
+        chart_type = "hbar"
+        reason = "many_categories" if n > 8 else "long_labels"
     elif len(value_keys) > 1:
         # Several measures compare best side by side.
         chart_type = "bar"
@@ -231,6 +259,7 @@ def recommend_chart(
     return {
         "type": chart_type,
         "label_key": label_key,
+        "label_keys": label_keys,
         "value_keys": value_keys,
         "reason": reason,
     }

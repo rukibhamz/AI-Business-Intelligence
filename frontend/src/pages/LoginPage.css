@@ -115,6 +115,17 @@
   line-height: 20px;
 }
 
+.cl-login-notice {
+  margin: 0;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--cl-accent) 28%, transparent);
+  border-radius: var(--cl-radius);
+  background: var(--cl-accent-quiet);
+  color: var(--cl-on-surface);
+  font-size: 13.5px;
+  line-height: 20px;
+}
+
 .cl-field {
   display: flex;
   flex-direction: column;
@@ -267,6 +278,33 @@
   font-size: 13px;
   line-height: 20px;
   color: var(--cl-on-surface-muted);
+}
+
+.cl-login-switch {
+  appearance: none;
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 700;
+  line-height: inherit;
+  color: var(--cl-accent-strong);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.cl-login-switch:hover {
+  color: var(--cl-accent);
+}
+
+.cl-login-switch:focus-visible {
+  outline: none;
+  border-radius: 2px;
+  box-shadow: var(--cl-focus-ring);
 }
 
 /* =========================================================== right ===== */
