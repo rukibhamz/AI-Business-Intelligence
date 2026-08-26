@@ -157,6 +157,8 @@ def plan_response(
     question: str,
     columns: list[str],
     rows: list[dict[str, Any]],
+    *,
+    sql: str | None = None,
 ) -> dict[str, Any]:
     """Return {format, chart, reason} for a result set."""
     if is_blank_result(columns, rows):
@@ -165,7 +167,7 @@ def plan_response(
 
     numeric = _numeric_columns(columns, rows)
     categorical = [c for c in columns if c not in numeric]
-    chart = recommend_chart(columns, rows, question=question)
+    chart = recommend_chart(columns, rows, question=question, sql=sql)
     chartable = chart["type"] != "table" and bool(chart.get("value_keys"))
 
     wants_chart = _matches(question, _CHART_WORDS)
@@ -272,11 +274,14 @@ def describe_result(
         label_key = categorical[0] if categorical else columns[0]
     # Describe the leading numeric column: whoever wrote the query put the
     # measure the question asked about first. The chart may plot several.
+    # Describe the column the chart plots — both follow what the query sorted
+    # by, so the sentence and the picture answer the same question.
     measure = None
-    if numeric:
+    chart_keys = (plan.get("chart") or {}).get("value_keys") or []
+    if chart_keys and chart_keys[0] in numeric:
+        measure = chart_keys[0]
+    elif numeric:
         measure = numeric[0]
-    elif plan.get("chart") and plan["chart"].get("value_keys"):
-        measure = plan["chart"]["value_keys"][0]
 
     sentences: list[str] = []
     # Management answers lead with the insight, not a row-count preamble.
@@ -298,7 +303,8 @@ def describe_result(
             grand = sum(totals.values())
             ranked = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
             top_label, top_value = ranked[0]
-            measure_label = measure.replace("_", " ")
+            # "Total total_profit" reads as a stutter; the column already says it.
+            measure_label = re.sub(r"^total[ _]", "", measure).replace("_", " ")
             ratio = is_ratio_column(measure)
 
             if len(ranked) == 1:
@@ -366,21 +372,29 @@ def describe_result(
 
 # --- optional LLM narrative -------------------------------------------------
 
-NARRATIVE_SYSTEM = """You are a business intelligence analyst.
+NARRATIVE_SYSTEM = """You brief a busy manager on what the query result means.
 Given a user's question and the exact rows a SQL query returned, answer in
-2-4 short sentences of plain English.
+2-4 fluent sentences of plain English — natural speech, not a template.
 
 Rules:
 - Use ONLY the numbers present in the rows. Never invent or extrapolate.
-- Lead with the direct answer to the question.
-- Mention the most important figure and any clear outlier.
-- No markdown, no bullet points, no preamble like "Based on the data".
+- Lead with the direct answer; put the key number in the first sentence.
+- Sound like a colleague talking, not a dashboard dumping labels
+  ("Revenue was £12,400 in June, led by…" not "The total_revenue field shows…").
+- Mention the most important figure and any clear outlier or contrast.
+- No markdown, no bullet points, no preamble like "Based on the data" or
+  "According to the query results".
+- Round large amounts readably when the rows already show decimals.
 - If the question implies a threshold (stockouts, missed targets, unusually high
   rates) and no row crosses it, say so AND still give the figures: name the
   highest and the lowest. "The data does not show X" on its own is not an answer
   when the rows carry the measure asked about.
 - Only say the rows cannot answer the question when the measure it asks about is
   genuinely absent from them.
+- The rows are what one query returned, not the whole dataset. Never write that
+  something is "the only one" or that "there are no others to compare" — the
+  query may simply have asked for a single row. Describe what is there without
+  claiming anything about what is not.
 - Requests for a bar, line, or pie chart are presentation only. Never refuse an
   answer because the user asked for a chart type — summarise the figures in the
   rows anyway. Chart rendering is handled outside your reply.

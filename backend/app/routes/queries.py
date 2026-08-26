@@ -21,16 +21,23 @@ from app.schemas import (
 )
 from app.services.ai_query import (
     UNTARGETED,
-    execute_sql,
+    build_question_plan,
+    execute_sql_with_repair,
     generate_diagnostic_answer,
     generate_narrative,
     generate_partial_answer,
     generate_sql,
     generate_workspace_sql,
     pack_result,
+    with_failover,
 )
 from app.services.analytics import load_dataset
-from app.services.app_settings import get_ai_runtime, get_currency, load_app_settings
+from app.services.app_settings import (
+    get_ai_runtime,
+    get_currency,
+    list_failover_runtimes,
+    load_app_settings,
+)
 from app.services.diagnostics import (
     build_partial_context,
     build_recommendations,
@@ -79,7 +86,9 @@ def query_to_response(
     chart: ChartRecommendation | None = None
     response_format = query.response_format
     if result:
-        plan = plan_response(query.natural_language, result.columns, result.rows)
+        plan = plan_response(
+            query.natural_language, result.columns, result.rows, sql=result.sql
+        )
         response_format = response_format or plan["format"]
         if response_format in ("chart", "narrative", "diagnostic") and plan.get("chart"):
             chart = ChartRecommendation(**plan["chart"])
@@ -431,37 +440,68 @@ async def run_query(
             await _finalize(db, query, payload, current_user)
             return query_to_response(query, mode=mode, explanation=explanation)
 
-        if pinned is not None:
-            source = pinned
-            previous = await _previous_question(db, payload.session_id, current_user)
-            sql, mode = await generate_sql(
-                source,
-                payload.natural_language,
-                api_key=runtime["api_key"],
-                model=runtime["model"],
-                base_url=runtime["base_url"],
-                previous_question=previous,
-            )
-        else:
-            previous = await _previous_question(db, payload.session_id, current_user)
-            source, sql, mode = await generate_workspace_sql(
+        previous = await _previous_question(db, payload.session_id, current_user)
+
+        async def plan_and_write_sql(active: dict[str, str]):
+            """Everything that needs a model. Retried against the next provider."""
+            plan_for_question = await build_question_plan(
+                pinned,
                 sources,
                 payload.natural_language,
-                api_key=runtime["api_key"],
-                model=runtime["model"],
-                base_url=runtime["base_url"],
                 previous_question=previous,
+                api_key=active["api_key"],
+                model=active["model"],
+                base_url=active["base_url"],
             )
+            if pinned is not None:
+                written, written_mode = await generate_sql(
+                    pinned,
+                    payload.natural_language,
+                    api_key=active["api_key"],
+                    model=active["model"],
+                    base_url=active["base_url"],
+                    previous_question=previous,
+                    analysis_plan=plan_for_question,
+                )
+                return pinned, written, written_mode, plan_for_question
+            chosen, written, written_mode = await generate_workspace_sql(
+                sources,
+                payload.natural_language,
+                api_key=active["api_key"],
+                model=active["model"],
+                base_url=active["base_url"],
+                previous_question=previous,
+                analysis_plan=plan_for_question,
+            )
+            return chosen, written, written_mode, plan_for_question
+
+        # One provider rate-limiting should not end the question when another
+        # is configured and idle.
+        providers = await list_failover_runtimes(db) or [runtime]
+        source, sql, mode, analysis_plan = await with_failover(providers, plan_and_write_sql)
+        if pinned is None:
             query.data_source_id = source.id
 
-        resolved_question = expand_question_with_context(
-            payload.natural_language, previous
+        # Prefer the planner rewrite; fall back to follow-up expansion.
+        resolved_question = (
+            analysis_plan.get("resolved_question")
+            or expand_question_with_context(payload.natural_language, previous)
         )
 
-        result = await execute_sql(source, sql)
-        query.generated_sql = result["sql"]
+        result, final_sql, repairs = await execute_sql_with_repair(
+            source,
+            sql,
+            resolved_question,
+            analysis_plan=analysis_plan,
+            api_key=runtime["api_key"],
+            model=runtime["model"],
+            base_url=runtime["base_url"],
+        )
+        query.generated_sql = final_sql
         query.result_json = pack_result(result)
         query.status = "completed"
+        if repairs:
+            mode = f"{mode}+repair"
 
         columns = result["columns"]
         rows = result["rows"]
@@ -469,7 +509,7 @@ async def run_query(
         # Guardrail: choose how to present this before writing the answer.
         # Use the resolved follow-up so "what about the least?" still plans as
         # a ranked product answer, not an empty/meta shape.
-        plan = plan_response(resolved_question, columns, rows)
+        plan = plan_response(resolved_question, columns, rows, sql=result.get("sql"))
         query.response_format = plan["format"]
 
         # When nothing matched, say so and name the range that does exist —
@@ -487,7 +527,7 @@ async def run_query(
                 source_name=source.name,
                 coverage=coverage,
             )
-        elif mode == UNTARGETED:
+        elif mode.startswith(UNTARGETED):
             # The offline planner did not understand the question, so these are
             # simply the first rows of the table. Summarising them as though
             # they answered it is how a wrong number reaches a decision.
@@ -515,8 +555,9 @@ async def run_query(
                 )
         query.answer = answer
 
+        repair_note = f" ({repairs} repair{'s' if repairs != 1 else ''})" if repairs else ""
         explanation = (
-            f"Answered from “{source.name}” via {mode}. "
+            f"Answered from “{source.name}” via {mode}{repair_note}. "
             f"Returned {len(rows)} row(s)."
         )
     except Exception as exc:

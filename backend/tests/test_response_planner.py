@@ -63,8 +63,52 @@ def test_dates_are_never_a_pie_chart():
     assert recommend_chart(SERIES_COLS, SERIES_ROWS)["type"] == "line"
 
 
-def test_few_categories_use_a_pie():
-    assert recommend_chart(REGION_COLS, REGION_ROWS)["type"] == "pie"
+def test_a_share_question_uses_a_pie():
+    """Slices claim the parts add up to a whole. Only a share question says so."""
+    chart = recommend_chart(
+        REGION_COLS, REGION_ROWS, question="what share of revenue does each region contribute"
+    )
+    assert chart["type"] == "pie"
+
+
+def test_a_ranking_question_uses_bars_not_slices():
+    """"Which region is biggest" is read as lengths, not as a share of a pie."""
+    chart = recommend_chart(
+        REGION_COLS, REGION_ROWS, question="which region generates the most revenue"
+    )
+    assert chart["type"] == "bar"
+
+
+def test_the_chart_plots_what_the_query_sorted_by():
+    """The ranking column is the answer; the counts behind it are working.
+
+    A live run charted total_orders and returned_orders while the answer was
+    the return rate, so the chart showed volumes and hid the point.
+    """
+    columns = ["product", "total_orders", "returned_orders", "return_rate_pct"]
+    rows = [
+        {"product": "Microwave", "total_orders": 300, "returned_orders": 92, "return_rate_pct": 30.7},
+        {"product": "Blender", "total_orders": 280, "returned_orders": 27, "return_rate_pct": 9.6},
+    ]
+    sql = (
+        "SELECT product, COUNT(*) AS total_orders, ... AS returned_orders, "
+        "... AS return_rate_pct FROM t GROUP BY product ORDER BY return_rate_pct DESC LIMIT 20"
+    )
+    chart = recommend_chart(columns, rows, question="which product is returned most", sql=sql)
+    assert chart["value_keys"] == ["return_rate_pct"]
+
+
+def test_an_ordinal_sort_position_also_resolves():
+    columns = ["store", "avg_stock_level", "min_stock_level"]
+    rows = [
+        {"store": "Kano", "avg_stock_level": 22.2, "min_stock_level": 2},
+        {"store": "Lagos", "avg_stock_level": 149.2, "min_stock_level": 40},
+    ]
+    chart = recommend_chart(
+        columns, rows, question="which store is low on stock",
+        sql="SELECT store, AVG(x), MIN(x) FROM t GROUP BY store ORDER BY 2 ASC LIMIT 20",
+    )
+    assert chart["value_keys"][0] == "avg_stock_level"
 
 
 def test_narrative_is_grounded_in_the_returned_rows():
@@ -254,3 +298,48 @@ def test_bar_chart_followup_rewrites_to_prior_question():
     )
     assert "month on month" in resolved.lower()
     assert "bar chart" in resolved.lower()
+
+
+def test_a_profitability_question_charts_the_margin_not_the_revenue():
+    """"Is growth leading to profitability" is answered by the margin line.
+
+    A revenue line beside a margin column shows revenue rising and hides the
+    margin sliding, which is the finding.
+    """
+    columns = ["period", "revenue", "margin_pct"]
+    rows = [
+        {"period": "2026-01", "revenue": 400_000, "margin_pct": 30.5},
+        {"period": "2026-06", "revenue": 416_000, "margin_pct": 22.4},
+    ]
+    chart = recommend_chart(
+        columns,
+        rows,
+        question="is revenue growth leading to stronger profitability",
+        sql="SELECT ... FROM t GROUP BY period ORDER BY period ASC",
+    )
+    assert chart["value_keys"] == ["margin_pct"]
+
+
+def test_a_plain_trend_question_still_charts_the_amount():
+    columns = ["period", "revenue", "margin_pct"]
+    rows = [
+        {"period": "2026-01", "revenue": 400_000, "margin_pct": 30.5},
+        {"period": "2026-06", "revenue": 416_000, "margin_pct": 22.4},
+    ]
+    chart = recommend_chart(
+        columns, rows, question="revenue over time",
+        sql="SELECT ... FROM t GROUP BY period ORDER BY period ASC",
+    )
+    assert chart["value_keys"] == ["revenue"]
+
+
+def test_the_narrative_does_not_stutter_on_a_total_column():
+    columns = ["employee", "total_profit"]
+    rows = [
+        {"employee": "Chidi Umeh", "total_profit": 178_812_500},
+        {"employee": "Bashir Lawal", "total_profit": 87_846_340},
+    ]
+    plan = plan_response("which employee performs best", columns, rows)
+    text = describe_result("which employee performs best", columns, rows, plan)
+    assert "Total total" not in text
+    assert "Total profit is" in text

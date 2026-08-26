@@ -40,8 +40,8 @@ AI-Business-Intelligence/
 
 | Field | Value |
 |-------|-------|
-| **Last updated** | 2026-08-25 |
-| **Last agent/session** | Multi-table sources, driver analysis, currency setting |
+| **Last updated** | 2026-08-26 |
+| **Last agent/session** | Question planner + SQL repair loop + narrative fluency |
 | **Active phase** | Phase 6 — mostly complete (see §3 Phase 6 table) |
 | **Phase status** | Phases 1–5 validated against the code; deploy artifacts in place |
 | **Blockers** | None for a soft launch. Open gaps listed in `docs/DEPLOYMENT.md` §6 |
@@ -177,6 +177,37 @@ AI-Business-Intelligence/
 - [x] **`python -m app.scripts.reset_workspace --yes`** — clears datasets,
       questions, chats and dashboards left over from local accounts. A script,
       never a startup step: a live database should not be wiped by a restart
+- [x] **Returns recorded as a flag** — a live test reported "All return rates are
+      0.0" on a dataset where one product came back 30% of the time. Three
+      causes: the AI mapping prompt described Returns as "a count of returns,
+      **not a flag name**", so `return_flag` was left unmapped; the text "True"
+      sums to zero in both SQL and Python; and `return_flag = TRUE` in SQLite
+      compares text to 1 and matches nothing. The mapping now accepts both
+      encodings, the analytics read either, and the SQL prompt says how to
+      compare a text boolean. A flag counts orders, a quantity counts units —
+      the KPI and finding say which
+- [x] **No `LIMIT 1` on a ranking** — asked which store earns most, the model
+      returned one row, which cannot be compared, cannot be charted, and led to
+      answers like "the only store in the results" and "there are no other
+      segments to compare". The prompt now requires the whole ranking, and the
+      narrative may not claim anything about rows the query did not ask for
+- [x] **No filtering a "which" question to nothing** — `HAVING MIN(stock) = 0`
+      matched no rows and answered "nothing matches those criteria" while one
+      store sat on a sixth of everyone else's cover. Rank, never filter
+- [x] **Charts plot the answer, not its ingredients** — the column a query sorts
+      by is what it was asked about, so `ORDER BY return_rate_pct` charts the
+      rate rather than the order counts beside it. A profitability question
+      charts the margin line, not the revenue line. Pie charts are reserved for
+      share questions; a ranking is bars
+- [x] **Rate limits are waited out, then handed to the next provider** — three
+      questions in a row hit the provider's limit mid-demo and failed with an
+      httpx URL in the message. Now retried with backoff and, when Settings
+      holds more than one provider, retried against the next one in priority
+      order — which is what that ordering was always for. If every provider is
+      busy the answer says so plainly
+- [x] **Verified against the real NexaSphere dataset** — all ten ground-truth
+      questions, 9 exact matches plus one (campaign ROI) correct in ranking and
+      reported as net return rather than gross
 - [x] **Chart-type fix:** a date axis is never a pie chart
 - [x] **Heuristic planner learned GROUP BY** — "revenue by region" now aggregates
       by region instead of dumping rows sorted by revenue; "over time" groups by
@@ -274,6 +305,16 @@ AI-Business-Intelligence/
 - [x] **Currency setting** — admins pick from 12 currencies in Settings, defaulting
       to **Naira**. Applies to KPIs, charts, and AI answers (the narrative prompt is
       told the currency so the model does not write dollar signs)
+- [x] **Structured question planner** (`services/question_planner.py`) — before SQL,
+      factual questions are rewritten into slots (measure, dimension, time window,
+      ranking, limit). Heuristic offline; LLM JSON when a key is set. The plan is
+      injected into the SQL prompt so the model follows intent instead of guessing.
+- [x] **SQL self-check + repair** (`execute_sql_with_repair` in `ai_query.py`) — on
+      execution error or blank results (when filters/ranking/time make emptiness
+      suspicious), the model gets the failed SQL + reason and rewrites up to twice.
+      Mode is reported as `openai+repair` when a repair was used.
+- [x] **Narrative fluency** — manager-brief tone in `NARRATIVE_SYSTEM`; slightly
+      higher temperature/token budget so answers read as speech, not field dumps
 
 > **Existing sources need a one-off recompute** to gain profiles — open Data
 > Sources and press **Recompute** (new uploads profile automatically).
@@ -284,6 +325,8 @@ AI-Business-Intelligence/
    hosting rationale
 2. Remaining Phase 6 work: Alembic (6.2) and object storage for uploads
 3. Close the gaps in `docs/DEPLOYMENT.md` §6 before treating this as production-grade
+4. Optional accuracy follow-ups: SQL result shape check vs plan slots; richer
+   offline planner coverage without an API key
 
 **Default credentials:** `admin@local.dev` / `admin123`
 

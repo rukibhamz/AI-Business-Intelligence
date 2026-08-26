@@ -233,19 +233,36 @@ def test_measurement_rules_ride_along_with_the_schema_prompt():
     assert "SUM(DISTINCT marketing_spend)" in prompt
 
 
-def test_measurement_rules_define_a_stockout_precisely():
-    """A level that never reaches zero is thin cover, not a stockout."""
+def test_stock_questions_are_ranked_never_filtered():
+    """A `HAVING MIN(stock) = 0` returned nothing and answered nothing.
+
+    Asked which store had stockouts, the model filtered to exactly zero, matched
+    no rows, and replied "nothing matches those criteria" — while one store sat
+    on a sixth of everyone else's cover.
+    """
     rules = build_measurement_rules(source(), COLUMNS)
-    assert "stockout is a level zero and nothing else" in rules
-    assert "thin cover, not a stockout" in rules
+    assert "never filter on a threshold" in rules
     assert "AVG(stock_on_hand)" in rules and "MIN(stock_on_hand)" in rules
+    assert "lowest cover is the stockout risk" in rules
 
 
-def test_stockout_definition_uses_the_reorder_level_when_there_is_one():
+def test_ranking_questions_may_not_ask_for_one_row():
+    """LIMIT 1 leaves nothing to compare and nothing to chart."""
+    rules = build_measurement_rules(source(), COLUMNS)
+    assert "never LIMIT 1" in rules
+    assert "cannot be charted" in rules
+
+
+def test_which_questions_may_not_filter_themselves_empty():
+    rules = build_measurement_rules(source(), COLUMNS)
+    assert "returns no rows cannot say which is worst" in rules
+
+
+def test_the_reorder_level_is_named_as_the_threshold_not_to_filter_on():
     columns = [*COLUMNS, "reorder_point"]
     mapped = source()
     config = json.loads(mapped.connection_config)
     config["field_mapping"] = {**MAPPING, "reorder_point": "Reorder Level"}
     mapped.connection_config = json.dumps(config)
     rules = build_measurement_rules(mapped, columns)
-    assert "at or below `reorder_point`" in rules
+    assert "reorder_point" in rules

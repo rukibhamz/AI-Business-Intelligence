@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 import json
 import re
@@ -19,10 +20,18 @@ from app.services.diagnostics import (
     build_partial_prompt,
     parse_advisory_json,
 )
+from app.services.question_planner import (
+    AnalysisPlan,
+    format_plan_for_sql,
+    heuristic_analysis_plan,
+    plan_analysis,
+    should_repair_blank,
+)
 from app.services.response_planner import (
     NARRATIVE_SYSTEM,
     build_narrative_prompt,
     expand_question_with_context,
+    is_blank_result,
     question_prompt_block,
     sanitize_narrative,
 )
@@ -58,11 +67,13 @@ Answering "how much / how many / total / average":
 
 SYSTEM_PROMPT = (
     """You are a SQL expert for a business intelligence tool.
-Given a database schema and a user question, return ONLY a single read-only SQL query.
+Given a database schema, an analysis plan, and a user question, return ONLY a
+single read-only SQL query.
 Rules:
 - SELECT or WITH only. No writes, DDL, or multiple statements.
 - Use only tables/columns from the schema.
-- Prefer LIMIT 50 unless the user asks for a specific limit.
+- Follow the ANALYSIS PLAN when present (measure, dimension, time, ranking).
+- Prefer LIMIT 50 unless the plan or user asks for a specific limit.
 - For MySQL / SQLite, use backticks for identifiers when needed.
 - Do not wrap the SQL in markdown fences.
 - Never answer questions about yourself, which model you are, or how the product
@@ -72,6 +83,23 @@ Rules:
   (e.g. "what about the least?", "and by region?") as continuing that analysis:
   keep the same measure, dimensions, and time filters unless the follow-up
   clearly changes them. Flip ranking words (highest↔lowest, most↔least, top↔bottom).
+"""
+    + DATE_RULES
+    + AGGREGATION_RULES
+)
+
+REPAIR_SYSTEM_PROMPT = (
+    """You repair a failed or empty read-only SQL query for a BI tool.
+You are given the schema, the analysis plan, the previous SQL, and why it failed
+(error message or empty result). Return ONLY a corrected single SELECT or WITH
+statement. No markdown fences, no commentary.
+
+Common fixes:
+- Wrong year or date filter → use years from the schema date range.
+- Wrong column name → pick the closest real column from the schema.
+- Over-strict WHERE → relax filters while keeping the measure and dimension.
+- Missing GROUP BY / aggregate alias for "how much / top / by X" questions.
+- Ranking without ORDER BY / LIMIT when the plan asks for top/bottom.
 """
     + DATE_RULES
     + AGGREGATION_RULES
@@ -91,7 +119,8 @@ SQL:
 Rules:
 - SELECT or WITH only. No writes, DDL, or multiple statements.
 - Use only tables/columns from the chosen source.
-- Prefer LIMIT 50 unless the user asks for a specific limit.
+- Follow the ANALYSIS PLAN when present.
+- Prefer LIMIT 50 unless the plan or user asks for a specific limit.
 - Never answer questions about yourself, which model you are, or how the product
   works with SQL. Those are not data questions — if asked, pick any SOURCE_ID and
   return: SELECT NULL AS unsupported WHERE 0;
@@ -104,6 +133,27 @@ Rules:
 )
 
 
+async def with_failover(runtimes: list[dict[str, str]], call):
+    """Run `call(runtime)` against each provider until one is not rate-limited.
+
+    Settings already lets an operator configure several providers with a
+    priority order; this is what makes that order mean something. A demo that
+    asks six questions in a minute exhausts a free tier, and falling back beats
+    failing.
+    """
+    if not runtimes:
+        raise ValueError("No AI provider is configured.")
+
+    last: Exception | None = None
+    for runtime in runtimes:
+        try:
+            return await call(runtime)
+        except ProviderBusy as exc:
+            last = exc
+            continue
+    raise last or ProviderBusy("Every configured AI provider is rate-limiting.")
+
+
 async def generate_sql(
     source: DataSource,
     question: str,
@@ -112,12 +162,16 @@ async def generate_sql(
     model: str | None = None,
     base_url: str | None = None,
     previous_question: str | None = None,
+    analysis_plan: AnalysisPlan | None = None,
 ) -> tuple[str, str]:
     """Returns (sql, mode) where mode is 'openai' or 'heuristic'."""
     key = api_key if api_key is not None else settings.openai_api_key
     mdl = model or settings.openai_model
     url = base_url or settings.openai_base_url
     resolved = expand_question_with_context(question, previous_question)
+    plan = analysis_plan or heuristic_analysis_plan(
+        question, previous_question=previous_question
+    )
 
     if key:
         sql = await _openai_sql(
@@ -127,16 +181,17 @@ async def generate_sql(
             model=mdl,
             base_url=url,
             previous_question=previous_question,
+            analysis_plan=plan,
         )
         return sql, "openai"
 
-    plan = heuristic_plan(source, resolved)
-    if not plan["sql"]:
+    plan_h = heuristic_plan(source, plan["resolved_question"] or resolved)
+    if not plan_h["sql"]:
         raise ValueError(
             "No OpenAI API key configured and could not build a heuristic query. "
             "Set it in Settings or OPENAI_API_KEY in .env"
         )
-    return plan["sql"], ("heuristic" if plan["targeted"] else UNTARGETED)
+    return plan_h["sql"], ("heuristic" if plan_h["targeted"] else UNTARGETED)
 
 
 async def generate_workspace_sql(
@@ -147,6 +202,7 @@ async def generate_workspace_sql(
     model: str | None = None,
     base_url: str | None = None,
     previous_question: str | None = None,
+    analysis_plan: AnalysisPlan | None = None,
 ) -> tuple[DataSource, str, str]:
     """Pick a source + SQL for a workspace question. Returns (source, sql, mode)."""
     if not sources:
@@ -156,6 +212,9 @@ async def generate_workspace_sql(
     mdl = model or settings.openai_model
     url = base_url or settings.openai_base_url
     resolved = expand_question_with_context(question, previous_question)
+    plan = analysis_plan or heuristic_analysis_plan(
+        question, previous_question=previous_question
+    )
 
     if key and len(sources) > 1:
         source_id, sql = await _openai_workspace_sql(
@@ -165,6 +224,7 @@ async def generate_workspace_sql(
             model=mdl,
             base_url=url,
             previous_question=previous_question,
+            analysis_plan=plan,
         )
         by_id = {s.id: s for s in sources}
         source = by_id.get(source_id) or pick_source_for_question(sources, resolved) or sources[0]
@@ -179,17 +239,18 @@ async def generate_workspace_sql(
             model=mdl,
             base_url=url,
             previous_question=previous_question,
+            analysis_plan=plan,
         )
         return source, sql, "openai"
 
     source = pick_source_for_question(sources, resolved) or sources[0]
-    plan = heuristic_plan(source, resolved)
-    if not plan["sql"]:
+    plan_h = heuristic_plan(source, plan["resolved_question"] or resolved)
+    if not plan_h["sql"]:
         raise ValueError(
             "No OpenAI API key configured and could not build a heuristic query. "
             "Set it in Settings or OPENAI_API_KEY in .env"
         )
-    return source, plan["sql"], ("heuristic" if plan["targeted"] else UNTARGETED)
+    return source, plan_h["sql"], ("heuristic" if plan_h["targeted"] else UNTARGETED)
 
 
 async def _openai_sql(
@@ -200,12 +261,17 @@ async def _openai_sql(
     model: str,
     base_url: str,
     previous_question: str | None = None,
+    analysis_plan: AnalysisPlan | None = None,
 ) -> str:
     schema_text = build_schema_prompt(source)
     ask = question_prompt_block(question, previous_question)
+    plan = analysis_plan or heuristic_analysis_plan(
+        question, previous_question=previous_question
+    )
+    plan_block = format_plan_for_sql(plan)
     content = await _chat_completion(
         system=SYSTEM_PROMPT,
-        user=f"{schema_text}\n\n{ask}\n\nSQL:",
+        user=f"{schema_text}\n\n{plan_block}\n\n{ask}\n\nSQL:",
         api_key=api_key,
         model=model,
         base_url=base_url,
@@ -221,12 +287,17 @@ async def _openai_workspace_sql(
     model: str,
     base_url: str,
     previous_question: str | None = None,
+    analysis_plan: AnalysisPlan | None = None,
 ) -> tuple[int, str]:
     catalog = build_workspace_schema_prompt(sources)
     ask = question_prompt_block(question, previous_question)
+    plan = analysis_plan or heuristic_analysis_plan(
+        question, previous_question=previous_question
+    )
+    plan_block = format_plan_for_sql(plan)
     content = await _chat_completion(
         system=WORKSPACE_SYSTEM_PROMPT,
-        user=f"{catalog}\n\n{ask}",
+        user=f"{catalog}\n\n{plan_block}\n\n{ask}",
         api_key=api_key,
         model=model,
         base_url=base_url,
@@ -240,6 +311,133 @@ async def _openai_workspace_sql(
         return picked.id, content.strip()
     return int(source_match.group(1)), sql_match.group(1).strip()
 
+
+async def repair_sql(
+    source: DataSource,
+    question: str,
+    *,
+    failed_sql: str,
+    failure_reason: str,
+    analysis_plan: AnalysisPlan,
+    api_key: str,
+    model: str,
+    base_url: str,
+) -> str:
+    """Ask the model for a corrected SELECT given why the last attempt failed."""
+    schema_text = build_schema_prompt(source)
+    plan_block = format_plan_for_sql(analysis_plan)
+    user = (
+        f"{schema_text}\n\n{plan_block}\n\n"
+        f"Question: {question}\n\n"
+        f"Previous SQL:\n{failed_sql}\n\n"
+        f"Failure: {failure_reason}\n\n"
+        "Corrected SQL:"
+    )
+    content = await _chat_completion(
+        system=REPAIR_SYSTEM_PROMPT,
+        user=user,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+    )
+    return _strip_sql_fences(content)
+
+
+async def execute_sql_with_repair(
+    source: DataSource,
+    sql: str,
+    question: str,
+    *,
+    analysis_plan: AnalysisPlan,
+    api_key: str | None,
+    model: str | None = None,
+    base_url: str | None = None,
+    max_repairs: int = 2,
+) -> tuple[dict[str, Any], str, int]:
+    """Run SQL; on error or blank (when worth it), repair and retry.
+
+    Returns (result, final_sql, repair_count).
+    """
+    mdl = model or settings.openai_model
+    url = base_url or settings.openai_base_url
+    current = sql
+    repairs = 0
+    last_error: str | None = None
+
+    for attempt in range(max_repairs + 1):
+        try:
+            result = await execute_sql(source, current)
+        except Exception as exc:
+            last_error = str(exc)
+            if not api_key or attempt >= max_repairs:
+                raise
+            current = await repair_sql(
+                source,
+                question,
+                failed_sql=current,
+                failure_reason=last_error,
+                analysis_plan=analysis_plan,
+                api_key=api_key,
+                model=mdl,
+                base_url=url,
+            )
+            repairs += 1
+            continue
+
+        blank = is_blank_result(result.get("columns", []), result.get("rows", []))
+        if (
+            blank
+            and api_key
+            and attempt < max_repairs
+            and should_repair_blank(question, analysis_plan)
+        ):
+            current = await repair_sql(
+                source,
+                question,
+                failed_sql=result.get("sql") or current,
+                failure_reason=(
+                    "Query returned no matching rows (or only NULL aggregates). "
+                    "Likely a wrong date filter, column, or over-strict WHERE."
+                ),
+                analysis_plan=analysis_plan,
+                api_key=api_key,
+                model=mdl,
+                base_url=url,
+            )
+            repairs += 1
+            continue
+
+        return result, result.get("sql") or current, repairs
+
+    # Unreachable, but keeps type checkers happy.
+    raise ValueError(last_error or "SQL repair exhausted")
+
+
+async def build_question_plan(
+    source: DataSource | None,
+    sources: list[DataSource],
+    question: str,
+    *,
+    previous_question: str | None,
+    api_key: str | None,
+    model: str | None,
+    base_url: str | None,
+) -> AnalysisPlan:
+    """Plan against the pinned source schema, or a short multi-source catalog."""
+    if source is not None:
+        schema_text = build_schema_prompt(source)
+    elif len(sources) == 1:
+        schema_text = build_schema_prompt(sources[0])
+    else:
+        schema_text = build_workspace_schema_prompt(sources)
+    return await plan_analysis(
+        question,
+        schema_text=schema_text,
+        previous_question=previous_question,
+        api_key=api_key,
+        model=model,
+        base_url=base_url,
+    )
 
 async def _chat_completion(
     *,
@@ -262,14 +460,47 @@ async def _chat_completion(
         "Content-Type": "application/json",
     }
     async with httpx.AsyncClient(timeout=60.0) as client:
-        res = await client.post(
-            f"{base_url.rstrip('/')}/chat/completions",
-            headers=headers,
-            json=payload,
-        )
-        res.raise_for_status()
+        res = await _post_with_backoff(client, base_url, headers, payload)
         data = res.json()
     return data["choices"][0]["message"]["content"].strip()
+
+
+#: Waits between retries when the provider says "too many requests". A demo that
+#: asks several questions in a row hits this, and a raw 429 ends the answer with
+#: an httpx URL in it.
+_RETRY_DELAYS = (1.0, 3.0, 6.0)
+
+
+class ProviderBusy(Exception):
+    """The AI provider is rate-limiting this key."""
+
+
+async def _post_with_backoff(
+    client: httpx.AsyncClient,
+    base_url: str,
+    headers: dict[str, str],
+    payload: dict[str, Any],
+) -> httpx.Response:
+    """POST a completion, waiting out a rate limit rather than failing on it."""
+    url = f"{base_url.rstrip('/')}/chat/completions"
+    for delay in (*_RETRY_DELAYS, None):
+        res = await client.post(url, headers=headers, json=payload)
+        if res.status_code != 429:
+            res.raise_for_status()
+            return res
+        if delay is None:
+            break
+        # Respect the provider's own pacing when it offers one.
+        retry_after = res.headers.get("retry-after")
+        try:
+            wait = float(retry_after) if retry_after else delay
+        except ValueError:
+            wait = delay
+        await asyncio.sleep(min(wait, 10.0))
+    raise ProviderBusy(
+        "The AI provider is rate-limiting this key. Wait a few seconds and ask again, "
+        "or add a second provider under Settings so questions can fail over."
+    )
 
 
 def _strip_sql_fences(content: str) -> str:
@@ -470,8 +701,8 @@ async def generate_narrative(
 
     payload = {
         "model": mdl,
-        "temperature": 0.2,
-        "max_tokens": 220,
+        "temperature": 0.35,
+        "max_tokens": 320,
         "messages": [
             {"role": "system", "content": NARRATIVE_SYSTEM},
             {"role": "user", "content": prompt},

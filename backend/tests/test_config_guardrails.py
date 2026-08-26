@@ -1,5 +1,7 @@
 """Production must refuse to start with the shipped development defaults."""
 
+import pytest
+
 from app.config import (
     INSECURE_ADMIN_PASSWORD,
     INSECURE_SECRET_KEY,
@@ -219,3 +221,76 @@ def test_a_sqlite_url_is_not_judged_by_server_rules():
     """SQLite addresses a file. No host is correct, not a misconfiguration."""
     for url in ("sqlite+aiosqlite:///:memory:", "sqlite+aiosqlite:///./local.db"):
         assert describe_database_url_problem(url) is None
+
+
+# --- the provider saying "slow down" ----------------------------------------
+
+
+async def test_a_rate_limited_provider_is_retried_then_explained():
+    """Three questions in a row hit Mistral's limit mid-demo and 400'd."""
+    import httpx
+
+    from app.services.ai_query import ProviderBusy, _post_with_backoff
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(429, headers={"retry-after": "0"}, json={"error": "slow down"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(ProviderBusy) as exc:
+            await _post_with_backoff(client, "https://api.test/v1", {}, {})
+
+    assert calls["n"] == 4  # three retries, then give up
+    assert "rate-limiting" in str(exc.value)
+    assert "http" not in str(exc.value).lower()  # no raw URL in the user's face
+
+
+async def test_a_recovered_rate_limit_returns_the_answer():
+    import httpx
+
+    from app.services.ai_query import _post_with_backoff
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, headers={"retry-after": "0"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        res = await _post_with_backoff(client, "https://api.test/v1", {}, {})
+    assert res.status_code == 200
+    assert calls["n"] == 2
+
+
+async def test_a_busy_provider_falls_over_to_the_next_one():
+    """Settings lets you configure several providers; this is what makes the
+    priority order mean something."""
+    from app.services.ai_query import ProviderBusy, with_failover
+
+    tried = []
+
+    async def call(runtime):
+        tried.append(runtime["label"])
+        if runtime["label"] == "busy":
+            raise ProviderBusy("rate limited")
+        return f"answered by {runtime['label']}"
+
+    result = await with_failover([{"label": "busy"}, {"label": "spare"}], call)
+    assert result == "answered by spare"
+    assert tried == ["busy", "spare"]
+
+
+async def test_every_provider_busy_reports_it_once():
+    from app.services.ai_query import ProviderBusy, with_failover
+
+    async def call(runtime):
+        raise ProviderBusy("rate limited")
+
+    with pytest.raises(ProviderBusy):
+        await with_failover([{"label": "a"}, {"label": "b"}], call)

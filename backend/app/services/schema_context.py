@@ -43,13 +43,17 @@ def build_schema_prompt(source: DataSource) -> str:
     chosen = next(
         (t for t in schema["tables"] if t["name"] == primary), schema["tables"][0]
     )
-    rules = build_measurement_rules(source, [c["name"] for c in chosen["columns"]])
+    rules = build_measurement_rules(
+        source, [c["name"] for c in chosen["columns"]], table=chosen["name"]
+    )
     if rules:
         lines.append("\n" + rules)
     return "\n".join(lines)
 
 
-def build_measurement_rules(source: DataSource, columns: list[str]) -> str:
+def build_measurement_rules(
+    source: DataSource, columns: list[str], table: str | None = None
+) -> str:
     """Dataset-specific rules the model cannot infer from column names.
 
     Tested against a live provider, the model summed a campaign budget that is
@@ -91,24 +95,31 @@ def build_measurement_rules(source: DataSource, columns: list[str]) -> str:
             )
 
     returns, quantity = canon.get("Returns"), canon.get("Quantity")
-    if returns and quantity:
-        rules.append(
-            f"- Return rate is SUM({returns}) / SUM({quantity}). `{returns}` counts units "
-            f"returned, so the denominator is units sold — never COUNT(*)."
-        )
+    if returns:
+        profiles = column_profiles(source, table) if table else {}
+        if is_flag_column(profiles.get(returns, {})):
+            rules.append(
+                f"- `{returns}` is a yes/no flag holding text such as True/False. Compare it "
+                f"as text — LOWER(TRIM({returns})) IN ('true','yes','1') — because comparing "
+                f"it to the keyword TRUE matches nothing and reports every rate as 0. One row "
+                f"is one order, so return rate is that count over COUNT(*)."
+            )
+        elif quantity:
+            rules.append(
+                f"- Return rate is SUM({returns}) / SUM({quantity}). `{returns}` counts units "
+                f"returned, so the denominator is units sold — never COUNT(*)."
+            )
 
     stock, reorder = canon.get("Stock"), canon.get("Reorder Level")
     if stock:
-        floor = (
-            f"at or below `{reorder}`" if reorder else "zero"
-        )
+        floor = f"at or below `{reorder}`" if reorder else "zero"
         holder = canon.get("Store ID") or canon.get("Product")
-        grouped = f" per `{holder}`" if holder else ""
+        holder = f"`{holder}`" if holder else ""
         rules.append(
-            f"- `{stock}` is a stock level. A stockout is a level {floor} and nothing else — "
-            "a low level that never reaches it is thin cover, not a stockout. Excess is a level "
-            f"far above the typical one. Return AVG({stock}) and MIN({stock}){grouped} so both "
-            "can be judged; the question has an answer even when nothing is at zero."
+            f"- `{stock}` is a stock level. Rank {holder or 'the groups'} by AVG({stock}) and "
+            f"include MIN({stock}) — never filter on a threshold such as {floor}. The lowest "
+            "cover is the stockout risk and the highest is the excess whether or not anything "
+            "sits at exactly zero; a filtered query that returns nothing cannot say which."
         )
 
     revenue, cost, profit = canon.get("Revenue"), canon.get("Cost"), canon.get("Profit")
@@ -124,12 +135,36 @@ def build_measurement_rules(source: DataSource, columns: list[str]) -> str:
         "broader one. If it names several, group by the FIRST one only; do not combine "
         "dimensions in one GROUP BY unless the question asks for the combination."
     )
+    rules.append(
+        "- Return the whole ranking, never LIMIT 1. \"Which store is best\" is answered by "
+        "every store in order: one row cannot be compared to anything, cannot be charted, "
+        "and leads to claims like \"the only store in the results\". Use LIMIT 20 or more."
+    )
+    rules.append(
+        "- Do not filter rows out with a threshold that might match nothing. No WHERE or "
+        "HAVING clause like `= 0`, `< 10` or `> average` for a \"which\" question: rank "
+        "every group and let the answer name the extreme. A query that returns no rows "
+        "cannot say which is worst — it can only say nothing was found."
+    )
+    rules.append(
+        "- When the answer is a ratio (return rate, ROI, attainment, margin), select the "
+        "parts as well as the ratio, and alias it so the formula is obvious — "
+        "revenue_per_cost, return_rate_pct, attainment_pct."
+    )
     date_col = _first(canon, "Date", "Timestamp")
     if date_col:
         rules.append(
             f"- A question about growth or a trend groups by period, e.g. "
             f"SUBSTR({date_col}, 1, 7) AS period, and returns one row per period."
         )
+        if revenue and (cost or profit):
+            earned = f"SUM({profit})" if profit else f"SUM({revenue}) - SUM({cost})"
+            rules.append(
+                f"- \"Is growth leading to profitability\" is answered by the margin "
+                f"trend, not by revenue and profit side by side. Include "
+                f"ROUND({earned} * 100.0 / NULLIF(SUM({revenue}), 0), 1) AS margin_pct "
+                "per period, so the answer can say whether it rose or fell."
+            )
 
     return "Measurement rules for this dataset:\n" + "\n".join(rules)
 
@@ -155,7 +190,9 @@ def build_workspace_schema_prompt(sources: list[DataSource]) -> str:
         if span:
             lines.append(f"  (covers {span[0]} to {span[1]})")
         rules = build_measurement_rules(
-            source, [c["name"] for c in schema["tables"][0]["columns"]]
+            source,
+            [c["name"] for c in schema["tables"][0]["columns"]],
+            table=schema["tables"][0]["name"],
         )
         if rules:
             lines.append("  " + rules.replace("\n", "\n  "))
@@ -361,6 +398,46 @@ _DIMENSION_WORDS: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 
+#: Values a yes/no column holds, whatever spelling the export used.
+_FLAG_VALUES = {"true", "false", "t", "f", "yes", "no", "y", "n", "0", "1"}
+
+#: The SQL that counts a flag regardless of spelling. SQLite compares the text
+#: "True" to the keyword TRUE as text-versus-1 and finds nothing, which reads as
+#: "nothing was ever returned".
+_FLAG_TRUE = ("'true'", "'t'", "'yes'", "'y'", "'1'")
+
+
+def column_profiles(source: DataSource, table: str) -> dict[str, dict[str, Any]]:
+    """What each column of a table actually holds, from the stored profile."""
+    schema = get_source_schema(source)
+    for candidate in schema["tables"]:
+        if candidate["name"] == table:
+            return {c["name"]: (c.get("profile") or {}) for c in candidate["columns"]}
+    return {}
+
+
+def is_flag_column(profile: dict[str, Any]) -> bool:
+    """True when the column only ever says yes or no."""
+    values = profile.get("values")
+    if isinstance(values, list) and values:
+        return {str(v).strip().lower() for v in values} <= _FLAG_VALUES
+    if profile.get("kind") == "number":
+        try:
+            return float(profile.get("min", 1)) >= 0 and float(profile.get("max", 2)) <= 1
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def flag_count_sql(column: str) -> str:
+    """Count the rows where a yes/no column says yes."""
+    quoted = quote_ident(column)
+    return (
+        f"SUM(CASE WHEN LOWER(TRIM(CAST({quoted} AS TEXT))) IN "
+        f"({', '.join(_FLAG_TRUE)}) THEN 1 ELSE 0 END)"
+    )
+
+
 def canonical_columns(source: DataSource, columns: list[str]) -> dict[str, str]:
     """Canonical field -> column name for the table being queried.
 
@@ -462,16 +539,29 @@ def metric_sql(
 
     # --- rates and ratios, most specific first ----------------------------
     returns, quantity = canon.get("Returns"), canon.get("Quantity")
-    if _asks(q, _ASK_RETURNS) and returns and quantity:
+    if _asks(q, _ASK_RETURNS) and returns:
         dim = natural("returns")
-        rate = (
-            f"ROUND(SUM({quote_ident(returns)}) * 100.0 / "
-            f"NULLIF(SUM({quote_ident(quantity)}), 0), 2) AS return_rate_pct"
-        )
-        units = f"SUM({quote_ident(quantity)}) AS units"
-        if dim:
-            return _grouped(table, dim, [rate, units], "2 DESC", limit, where_sql)
-        return f"SELECT {rate}, {units} FROM {quote_ident(table)}{where_sql}"
+        profiles = column_profiles(source, table)
+        if is_flag_column(profiles.get(returns, {})):
+            # A per-row flag counts orders: the row is the order, not the unit.
+            rate = (
+                f"ROUND({flag_count_sql(returns)} * 100.0 / NULLIF(COUNT(*), 0), 2) "
+                "AS return_rate_pct"
+            )
+            volume = "COUNT(*) AS orders"
+        elif quantity:
+            rate = (
+                f"ROUND(SUM({quote_ident(returns)}) * 100.0 / "
+                f"NULLIF(SUM({quote_ident(quantity)}), 0), 2) AS return_rate_pct"
+            )
+            volume = f"SUM({quote_ident(quantity)}) AS units"
+        else:
+            rate = volume = ""
+
+        if rate:
+            if dim:
+                return _grouped(table, dim, [rate, volume], "2 DESC", limit, where_sql)
+            return f"SELECT {rate}, {volume} FROM {quote_ident(table)}{where_sql}"
 
     spend = canon.get("Marketing Spend")
     if _asks(q, _ASK_ROI) and spend and revenue:

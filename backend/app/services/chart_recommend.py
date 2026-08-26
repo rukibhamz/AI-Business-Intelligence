@@ -73,11 +73,61 @@ def _to_number(value: Any) -> float | None:
     return float(str(value).strip().replace(",", ""))
 
 
+#: A pie is right for parts of one whole. A ranking is not that — "which store
+#: is best" wants lengths side by side, not slices.
+#: "breakdown" belongs to the comparison cues below, which make bars — one word
+#: cannot decide two different chart types.
+_SHARE_WORDS = ("share of", "proportion", "split", "mix", "percent of", "% of", "distribution")
+
+
+def ordered_measure(sql: str | None, columns: list[str]) -> str | None:
+    """The column a query sorted by — which is the column it was asked about.
+
+    A query answering "which product is returned most" selects the order counts
+    *and* the rate, then sorts by the rate. Charting the counts plots the
+    ingredients and hides the answer, so the sort is the most reliable signal of
+    which column carries the point.
+    """
+    if not sql or not columns:
+        return None
+    match = re.search(r"\border\s+by\s+(.+?)(?:\s+limit\b|$)", sql, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+
+    first = match.group(1).split(",")[0].strip()
+    first = re.sub(r"\s+(asc|desc)\s*$", "", first, flags=re.IGNORECASE).strip()
+    first = first.strip("`\"[] ")
+
+    if first.isdigit():  # ORDER BY 2 — a column position, 1-based
+        index = int(first) - 1
+        return columns[index] if 0 <= index < len(columns) else None
+
+    return {c.lower(): c for c in columns}.get(first.lower())
+
+
+#: Questions whose answer is the ratio, even when an amount sits beside it.
+_RATIO_QUESTIONS = (
+    "margin", "profitability", "profitable", "return rate", "roi",
+    "return on", "attainment", "rate", "per unit", "efficiency",
+)
+
+
+def prefers_ratio(question: str | None) -> bool:
+    q = f" {(question or '').lower()} "
+    return any(word in q for word in _RATIO_QUESTIONS)
+
+
+def wants_share(question: str | None) -> bool:
+    q = f" {(question or '').lower()} "
+    return any(word in q for word in _SHARE_WORDS)
+
+
 def recommend_chart(
     columns: list[str],
     rows: list[dict[str, Any]],
     *,
     question: str | None = None,
+    sql: str | None = None,
 ) -> dict[str, Any]:
     """Heuristic chart recommendation from tabular result shape.
 
@@ -107,9 +157,19 @@ def recommend_chart(
 
     label_key = categorical[0] if categorical else columns[0]
     preferred = ("revenue", "amount", "total", "sales", "value", "count", "profit", "margin")
+    answer_column = ordered_measure(sql, columns)
+    if answer_column not in numeric:
+        # The query sorted by its label — a time series. The measure then comes
+        # from the question: "is growth leading to profitability" is answered by
+        # the margin line, not by the revenue line beside it.
+        answer_column = None
+        if prefers_ratio(question):
+            answer_column = next((c for c in numeric if is_ratio_column(c)), None)
     ranked = sorted(
         [c for c in numeric if c != label_key],
         key=lambda c: (
+            # Whatever the query sorted by is the answer; the rest is working.
+            0 if c == answer_column else 1,
             0 if c.lower() in preferred else 1,
             0 if any(p in c.lower() for p in preferred) else 1,
             columns.index(c),
@@ -148,11 +208,17 @@ def recommend_chart(
     elif wants_comparison:
         chart_type = "bar"
         reason = "comparison"
-    elif n <= 6 and categorical and axis_family(value_keys[0]) == "amount":
-        # Pie only for a small set of parts that add up to a meaningful whole.
-        # Rates are not parts of anything: return rates do not sum to 100%.
+    elif (
+        n <= 6
+        and categorical
+        and axis_family(value_keys[0]) == "amount"
+        and wants_share(question)
+    ):
+        # Pie only for a small set of parts that add up to a meaningful whole,
+        # and only when the question is about that split. A ranking reads as
+        # lengths, not slices, and rates are not parts of anything.
         chart_type = "pie"
-        reason = "few_categories"
+        reason = "share_of_total"
 
     if forced and chart_type != "table":
         # Honour an explicit ask when the shape can still be drawn.

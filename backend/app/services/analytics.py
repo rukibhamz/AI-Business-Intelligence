@@ -61,6 +61,44 @@ _DATE_PATTERNS = (
 # ---------------------------------------------------------------------------
 
 
+#: How a spreadsheet writes "yes". pandas writes True/False; exports from
+#: retail systems use Y/N, yes/no, or 1/0.
+_TRUTHY = {"true", "t", "yes", "y", "1", "returned", "return"}
+_FALSY = {"false", "f", "no", "n", "0", "", "none", "null", "nan"}
+
+
+def to_flag(value: Any) -> float | None:
+    """1.0 or 0.0 for a boolean column, whatever spelling it uses.
+
+    A return flag written as the text "True" sums to zero in SQL and in Python,
+    which reads as "nothing was ever returned" rather than as a type mismatch.
+    """
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if value is None:
+        return 0.0
+    text = str(value).strip().lower()
+    if text in _TRUTHY:
+        return 1.0
+    if text in _FALSY:
+        return 0.0
+    return None
+
+
+def looks_like_flag(values: Iterable[Any], *, sample: int = 200) -> bool:
+    """True when a column only ever holds a yes/no value."""
+    seen = 0
+    for value in values:
+        if value is None or str(value).strip() == "":
+            continue
+        if to_flag(value) is None:
+            return False
+        seen += 1
+        if seen >= sample:
+            break
+    return seen > 0
+
+
 def to_number(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
@@ -532,6 +570,95 @@ def aggregate_by_grain(
     ]
 
 
+def returns_basis(dataset: Dataset, returns_col: str) -> tuple[bool, str | None]:
+    """How this dataset records returns, and what to divide by.
+
+    Two encodings are common and they need different denominators:
+
+    * a **count of returned units** — divide by units sold;
+    * a **per-row flag** (`return_flag` holding true/false) — divide by the
+      number of rows, because the row is the order, not the unit.
+
+    Getting this wrong is not a rounding error: summing the text "True" gives
+    zero, and the product returned a third of the time reads as flawless.
+    """
+    flag = looks_like_flag(row.get(returns_col) for row in dataset.rows)
+    if flag:
+        return True, None
+    return False, dataset.column_for("Quantity")
+
+
+def returns_value(row: dict[str, Any], column: str, *, is_flag: bool) -> float | None:
+    return to_flag(row.get(column)) if is_flag else to_number(row.get(column))
+
+
+def return_rate_by(
+    dataset: Dataset,
+    dimension: str,
+    returns_col: str,
+    *,
+    min_denominator: float = 5.0,
+    limit: int = 12,
+) -> list[dict[str, Any]]:
+    """Return rate per dimension value, worst first, in percent."""
+    is_flag, quantity_col = returns_basis(dataset, returns_col)
+    if not is_flag and not quantity_col:
+        return []
+
+    nums: dict[str, float] = {}
+    dens: dict[str, float] = {}
+    for row in dataset.rows:
+        key = str(row.get(dimension, "")).strip()
+        if not key:
+            continue
+        value = returns_value(row, returns_col, is_flag=is_flag)
+        if value is None:
+            continue
+        nums[key] = nums.get(key, 0.0) + value
+        # A flag counts orders; a count of units divides by units sold.
+        if is_flag:
+            dens[key] = dens.get(key, 0.0) + 1
+        else:
+            units = to_number(row.get(quantity_col))
+            if units is not None:
+                dens[key] = dens.get(key, 0.0) + units
+
+    out = []
+    for key, den in dens.items():
+        if den < min_denominator:
+            continue
+        out.append(
+            {
+                "label": key,
+                "value": round(nums.get(key, 0.0) / den * 100, 2),
+                "count": int(den),
+            }
+        )
+    out.sort(key=lambda item: item["value"], reverse=True)
+    return out[:limit]
+
+
+def overall_return_rate(dataset: Dataset, returns_col: str) -> float | None:
+    """Return rate across the whole dataset, as a fraction."""
+    is_flag, quantity_col = returns_basis(dataset, returns_col)
+    if not is_flag and not quantity_col:
+        return None
+    returned = 0.0
+    total = 0.0
+    for row in dataset.rows:
+        value = returns_value(row, returns_col, is_flag=is_flag)
+        if value is None:
+            continue
+        returned += value
+        if is_flag:
+            total += 1
+        else:
+            units = to_number(row.get(quantity_col))
+            if units is not None:
+                total += units
+    return _safe_div(returned, total)
+
+
 def ratio_by(
     dataset: Dataset,
     dimension: str,
@@ -759,11 +886,20 @@ def build_overview(dataset: Dataset) -> dict[str, Any]:
     campaign_col = dataset.column_for("Campaign")
     store_col = dataset.column_for("Store ID")
 
-    if returns_col and quantity_col:
-        units = dataset.sum_of(quantity_col)
-        returned = dataset.sum_of(returns_col)
-        rate = _safe_div(returned, units)
+    if returns_col:
+        # A flag counts orders, a quantity counts units — say which was counted.
+        is_flag, units_col = returns_basis(dataset, returns_col)
+        rate = overall_return_rate(dataset, returns_col)
         if rate is not None:
+            returned = sum(
+                v
+                for v in (
+                    returns_value(row, returns_col, is_flag=is_flag) for row in dataset.rows
+                )
+                if v is not None
+            )
+            total = len(dataset.rows) if is_flag else dataset.sum_of(units_col or "")
+            noun = "orders" if is_flag else "units"
             kpis.append(
                 _kpi(
                     "return_rate",
@@ -771,7 +907,7 @@ def build_overview(dataset: Dataset) -> dict[str, Any]:
                     round(rate * 100, 2),
                     "percent",
                     higher_is_better=False,
-                    caption=f"{returned:,.0f} of {units:,.0f} units",
+                    caption=f"{returned:,.0f} of {total:,.0f} {noun}",
                 )
             )
 
@@ -1345,11 +1481,11 @@ def build_findings(dataset: Dataset) -> list[dict[str, Any]]:
 
     # 4c. Products returned far more often than the rest.
     returns_col = dataset.column_for("Returns")
-    quantity_col = dataset.column_for("Quantity")
     product_col = dataset.column_for("Product")
-    if returns_col and quantity_col and product_col:
-        rates = ratio_by(dataset, product_col, returns_col, quantity_col, min_denominator=5)
-        overall = _safe_div(dataset.sum_of(returns_col), dataset.sum_of(quantity_col))
+    if returns_col and product_col:
+        rates = return_rate_by(dataset, product_col, returns_col, min_denominator=5)
+        overall = overall_return_rate(dataset, returns_col)
+        basis_noun = "orders" if returns_basis(dataset, returns_col)[0] else "units"
         if len(rates) >= 2 and overall:
             worst = rates[0]
             if worst["value"] > overall * 100 * 1.5 and worst["value"] >= 5:
@@ -1360,7 +1496,7 @@ def build_findings(dataset: Dataset) -> list[dict[str, Any]]:
                         f"{worst['label']} is returned {worst['value']:.1f}% of the time",
                         f"Against an overall return rate of {overall * 100:.1f}%, "
                         f"{worst['label']} runs at {worst['value']:.1f}% across "
-                        f"{worst['count']:,} units.",
+                        f"{worst['count']:,} {basis_noun}.",
                         "Inspect quality, listing accuracy, and packaging for this line "
                         "before it erodes more margin.",
                         context="Returns",

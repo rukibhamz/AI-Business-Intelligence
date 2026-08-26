@@ -19,8 +19,12 @@ from app.services.analytics import (
     build_findings,
     build_overview,
     is_repeated_per_group,
+    overall_return_rate,
     profit_by,
     ratio_by,
+    return_rate_by,
+    returns_basis,
+    to_flag,
     total_by_grain,
 )
 from app.services.field_mapping import (
@@ -405,3 +409,73 @@ def test_campaign_roi_flags_a_wide_spread_even_when_both_are_profitable():
     roi = [f for f in build_findings(make_dataset(rows)) if f["id"].endswith("-campaign-roi")]
     assert roi, "a nine-fold efficiency gap should not pass silently"
     assert "Efficient" in roi[0]["title"] or "Efficient" in roi[0]["body"]
+
+
+# --- returns recorded as a flag ---------------------------------------------
+#
+# A live run reported "All return rates are 0.0" on a dataset where one product
+# came back 30% of the time. The column held the text "True", which sums to zero
+# in both SQL and Python — so nothing was ever counted as returned.
+
+
+def flag_rows():
+    """Sixteen orders of two products; the microwave comes back three times in four."""
+    rows = []
+    for i in range(8):
+        rows.append(
+            row(f"2026-01-0{i + 1}", "Ikeja", "Microwave X200", "C", 100, 1, 1000, 600, 0)
+            | {"returned": "True" if i < 6 else "False"}
+        )
+    for i in range(8):
+        rows.append(
+            row(f"2026-02-0{i + 1}", "Ikeja", "Smart TV", "C", 100, 1, 2000, 1200, 0)
+            | {"returned": "False"}
+        )
+    return rows
+
+
+def flag_dataset():
+    return make_dataset(flag_rows(), mapping={**MAPPING, "returned": "Returns"})
+
+
+def test_a_text_boolean_is_read_as_a_return():
+    assert to_flag("True") == 1.0
+    assert to_flag("true") == 1.0
+    assert to_flag("YES") == 1.0
+    assert to_flag("False") == 0.0
+    assert to_flag("no") == 0.0
+    assert to_flag("") == 0.0
+    assert to_flag("banana") is None
+
+
+def test_a_flag_column_is_recognised_as_one():
+    dataset = flag_dataset()
+    is_flag, units = returns_basis(dataset, "returned")
+    assert is_flag is True
+    assert units is None  # orders, not units, are the denominator
+
+
+def test_a_counted_returns_column_still_divides_by_units():
+    dataset = make_dataset()
+    is_flag, units = returns_basis(dataset, "returned")
+    assert is_flag is False
+    assert units == "units"
+
+
+def test_the_return_rate_of_a_flagged_product_is_not_zero():
+    rates = return_rate_by(flag_dataset(), "product", "returned", min_denominator=1)
+    worst = rates[0]
+    assert worst["label"] == "Microwave X200"
+    assert worst["value"] == pytest.approx(75.0)  # 6 of 8 orders
+    assert rates[-1]["value"] == 0.0
+
+
+def test_the_overall_return_rate_counts_orders_for_a_flag():
+    assert overall_return_rate(flag_dataset(), "returned") == pytest.approx(0.375)
+
+
+def test_a_flagged_outlier_still_raises_a_finding():
+    dataset = flag_dataset()
+    returns = [f for f in build_findings(dataset) if f["id"].endswith("-returns")]
+    assert returns, "a product returned in 3 of 4 orders should be flagged"
+    assert "Microwave X200" in returns[0]["title"]

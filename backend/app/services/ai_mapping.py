@@ -39,7 +39,10 @@ FIELD_GUIDE = {
     "Target": "the revenue or sales goal to hit — quota, budget, forecast",
     "Marketing Spend": "advertising or campaign budget — keep separate from Cost",
     # quality and service
-    "Returns": "units returned or refunded — a count of returns, not a flag name",
+    "Returns": "whether or how much came back — either a count of returned "
+    "units, or a per-row flag such as return_flag/is_returned holding "
+    "true/false, yes/no or 1/0. Map both; only a column about something else "
+    "that happens to be a flag belongs in Ignore",
     "Rating": "customer satisfaction score — rating, CSAT, NPS, stars",
     "Delivery Days": "how long delivery took, in days",
     # stock
