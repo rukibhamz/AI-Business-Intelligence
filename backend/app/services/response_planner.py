@@ -669,17 +669,28 @@ def expand_question_with_context(
     return rewritten
 
 
-def question_prompt_block(question: str, previous_question: str | None) -> str:
-    """User-message block for SQL generation, including follow-up context."""
+def question_prompt_block(
+    question: str,
+    previous_question: str | None,
+    context_block: str | None = None,
+) -> str:
+    """User-message block for SQL generation, including follow-up context.
+
+    The transcript goes in whenever there is one, not only for a question that
+    *looks* like a follow-up: "and by region?" is obvious, but "which was worst"
+    is not, and both need the turn before them to mean anything.
+    """
     resolved = expand_question_with_context(question, previous_question)
+    history = f"{context_block.strip()}\n\n" if context_block and context_block.strip() else ""
     if previous_question and looks_like_followup(question):
         return (
+            f"{history}"
             f"PREVIOUS QUESTION: {previous_question.strip()}\n"
             f"FOLLOW-UP: {question.strip()}\n"
             f"RESOLVED QUESTION: {resolved}\n\n"
             f"Write SQL for the resolved question."
         )
-    return f"Question: {resolved}"
+    return f"{history}Question: {resolved}"
 
 
 def classify_intent(question: str) -> QuestionIntent:

@@ -12,7 +12,7 @@ import math
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from app.models import DataSource
@@ -240,6 +240,11 @@ def _granularity(span_days: int) -> str:
 def _bucket_for(value: date, granularity: str) -> Bucket:
     if granularity == "day":
         return Bucket(value.isoformat(), value.strftime("%d %b"), value)
+    if granularity == "week":
+        start = value - timedelta(days=value.weekday())
+        return Bucket(
+            f"W{start.isoformat()}", f"week of {start.strftime('%d %b')}", start
+        )
     if granularity == "month":
         start = date(value.year, value.month, 1)
         return Bucket(start.strftime("%Y-%m"), start.strftime("%b %Y"), start)
@@ -281,6 +286,64 @@ def build_time_index(dataset: Dataset, date_column: str) -> TimeIndex | None:
 
     buckets = sorted(seen.values(), key=lambda b: b.start)
     return TimeIndex(granularity, buckets, row_bucket, lo, hi)
+
+
+#: Bucket sizes for a period comparison, coarsest first, with the span each one
+#: is the natural choice for.
+_COMPARISON_LADDER: tuple[tuple[str, int], ...] = (
+    ("year", 1501),
+    ("month", 71),
+    ("week", 15),
+    ("day", 0),
+)
+
+
+def _comparison_granularity(span_days: int) -> str:
+    """Bucket size for "the latest period against the one before it".
+
+    Deliberately coarser than `_granularity`, which optimises for a readable
+    trend line. A 60-day span wants 60 points on a chart, but comparing the last
+    two of *those* compares two individual trading days — that is noise, not a
+    period, and it reads as a collapse whenever the final day happens to be
+    quiet.
+    """
+    for granularity, floor in _COMPARISON_LADDER:
+        if span_days >= floor:
+            return granularity
+    return "day"
+
+
+def build_comparison_index(dataset: Dataset, date_column: str) -> TimeIndex | None:
+    """A time index whose buckets are worth comparing against each other.
+
+    Starts at the granularity the span calls for and steps finer only when that
+    leaves nothing to compare — three weeks inside one calendar month is one
+    monthly bucket, so it becomes three weekly ones.
+    """
+    parsed: list[date | None] = [to_date(row.get(date_column)) for row in dataset.rows]
+    valid = [d for d in parsed if d is not None]
+    if len(valid) < 2:
+        return None
+
+    lo, hi = min(valid), max(valid)
+    order = [g for g, _ in _COMPARISON_LADDER]
+    start = order.index(_comparison_granularity((hi - lo).days))
+
+    for granularity in order[start:]:
+        seen: dict[str, Bucket] = {}
+        row_bucket: list[str | None] = []
+        for value in parsed:
+            if value is None:
+                row_bucket.append(None)
+                continue
+            bucket = _bucket_for(value, granularity)
+            seen.setdefault(bucket.key, bucket)
+            row_bucket.append(bucket.key)
+        if len(seen) >= 2:
+            buckets = sorted(seen.values(), key=lambda b: b.start)
+            return TimeIndex(granularity, buckets, row_bucket, lo, hi)
+
+    return None
 
 
 def bucket_totals(dataset: Dataset, index: TimeIndex, column: str) -> dict[str, float]:

@@ -88,6 +88,23 @@
   color: var(--cl-outline);
 }
 
+/* A plain checkbox row — the field it sits in already carries the label. */
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--cl-space-sm);
+  font-size: 13px;
+  color: var(--cl-on-surface);
+  cursor: pointer;
+}
+
+.settings-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--cl-accent-strong, var(--cl-primary));
+  cursor: pointer;
+}
+
 .settings-select-wrap {
   position: relative;
 }

@@ -100,6 +100,10 @@ export function SettingsPage({ onSaved }: Props) {
   const [currency, setCurrencyChoice] = useState('NGN')
   const [providers, setProviders] = useState<DraftProvider[]>([])
   const [activeId, setActiveId] = useState<string | null>(null)
+  // Web research: the practice lane on advisory answers. Off unless a key is set.
+  const [researchOn, setResearchOn] = useState(false)
+  const [braveKey, setBraveKey] = useState('')
+  const [braveCountry, setBraveCountry] = useState('')
 
   function hydrate(s: AppSettings) {
     setSettings(s)
@@ -107,6 +111,9 @@ export function SettingsPage({ onSaved }: Props) {
     setTagline(s.platform_tagline)
     setScheme(s.color_scheme)
     setCurrencyChoice(s.currency || 'NGN')
+    setResearchOn(Boolean(s.web_research_enabled))
+    setBraveCountry(s.brave_search_country || '')
+    setBraveKey(s.brave_search_key_masked || '')
     const list = (s.llm_providers?.length ? s.llm_providers : []).map(toDraft)
     if (list.length === 0) {
       list.push(
@@ -146,6 +153,12 @@ export function SettingsPage({ onSaved }: Props) {
       platform_tagline: tagline.trim(),
       color_scheme: scheme,
       currency,
+      web_research_enabled: researchOn,
+      brave_search_country: braveCountry.trim().toUpperCase() || undefined,
+      // A masked value round-tripping is a no-op; only a real key is saved.
+      ...(braveKey.trim() && !braveKey.includes('•')
+        ? { brave_search_api_key: braveKey.trim() }
+        : {}),
       active_provider_id: activeId || undefined,
       llm_providers: providers.map((p) => {
         const row: LlmProviderUpdate = {
@@ -355,6 +368,43 @@ export function SettingsPage({ onSaved }: Props) {
             </div>
             <span className="settings-hint">
               Applies to every money figure — KPIs, charts, and AI answers.
+            </span>
+          </div>
+
+          <div className="settings-field">
+            <span className="settings-label">Web research</span>
+            <label className="settings-toggle">
+              <input
+                type="checkbox"
+                checked={researchOn}
+                onChange={(e) => setResearchOn(e.target.checked)}
+              />
+              <span>Add outside guidance to advice questions</span>
+            </label>
+            <span className="settings-hint">
+              When someone asks what to do, the answer keeps its measured findings and
+              adds a separate, clearly marked list of general practices retrieved from
+              the web, each with a link. Retrieved guidance never carries a figure
+              about your business — every number still comes from your own data.
+            </span>
+            <input
+              type="password"
+              value={braveKey}
+              placeholder="Brave Search API key"
+              autoComplete="off"
+              onChange={(e) => setBraveKey(e.target.value)}
+            />
+            <input
+              type="text"
+              value={braveCountry}
+              placeholder="Country bias, e.g. NG (optional)"
+              maxLength={2}
+              onChange={(e) => setBraveCountry(e.target.value)}
+            />
+            <span className="settings-hint">
+              {settings?.brave_search_key_set
+                ? 'A key is saved. Leave the field untouched to keep it.'
+                : 'No key saved — advice answers stay measured-only until one is added.'}
             </span>
           </div>
 

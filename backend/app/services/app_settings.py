@@ -106,6 +106,11 @@ DEFAULTS: dict[str, Any] = {
     "logo_url": None,
     "color_scheme": "cobalt",
     "currency": DEFAULT_CURRENCY,
+    # Turning this on adds a retrieved, cited practice lane to advisory answers.
+    # It never touches the measured lane; blank simply leaves it off.
+    "brave_search_api_key": settings.brave_search_api_key or "",
+    "brave_search_country": settings.brave_search_country or "",
+    "web_research_enabled": bool(settings.brave_search_api_key),
 }
 
 
@@ -248,7 +253,7 @@ async def save_app_settings(db: AsyncSession, updates: dict[str, Any]) -> dict[s
     for key, value in updates.items():
         if key in ("llm_providers", "active_provider_id"):
             continue
-        if key == "openai_api_key":
+        if key in ("openai_api_key", "brave_search_api_key"):
             if value is None or value == "" or set(str(value)) <= {"•", "."}:
                 continue
             current[key] = value
@@ -389,6 +394,12 @@ def public_settings_view(data: dict[str, Any]) -> dict[str, Any]:
         "color_schemes": [{"id": sid, **meta} for sid, meta in COLOR_SCHEMES.items()],
         "providers": list(PROVIDER_PRESETS.keys()),
         "currency": _valid_currency(data.get("currency")),
+        "brave_search_key_set": bool(data.get("brave_search_api_key")),
+        "brave_search_key_masked": _mask_key(str(data.get("brave_search_api_key") or "")),
+        "brave_search_country": data.get("brave_search_country", ""),
+        "web_research_enabled": bool(
+            data.get("web_research_enabled") and data.get("brave_search_api_key")
+        ),
         "currencies": [
             {"code": code, "label": meta["label"], "symbol": meta["symbol"]}
             for code, meta in CURRENCIES.items()
@@ -405,6 +416,19 @@ async def get_currency(db) -> str:
     """The currency every money figure should be rendered in."""
     data = await load_app_settings(db)
     return _valid_currency(data.get("currency"))
+
+
+async def get_research_runtime(db: AsyncSession) -> dict[str, str] | None:
+    """Brave credentials for the practice lane, or None when it is off.
+
+    None is the normal state: with no key configured an advisory answer is
+    exactly what it was before this lane existed.
+    """
+    data = await load_app_settings(db)
+    key = str(data.get("brave_search_api_key") or "").strip()
+    if not key or not data.get("web_research_enabled", True):
+        return None
+    return {"api_key": key, "country": str(data.get("brave_search_country") or "").strip()}
 
 
 def pick_runtime_from_providers(
@@ -497,6 +521,10 @@ def member_settings_view(view: dict[str, Any]) -> dict[str, Any]:
         "providers": [],
         "color_schemes": [],
         "currencies": [],
+        "brave_search_key_set": False,
+        "brave_search_key_masked": None,
+        "brave_search_country": "",
+        "web_research_enabled": False,
     }
     for field in MEMBER_VISIBLE_FIELDS:
         if field in view:

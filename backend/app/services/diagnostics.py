@@ -27,6 +27,7 @@ from app.services.analytics import (
     Dataset,
     TimeIndex,
     bucket_totals,
+    build_comparison_index,
     build_time_index,
     to_number,
 )
@@ -44,6 +45,17 @@ _MEASURE_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("stock", "inventory"), "Stock"),
     (("rating", "satisfaction", "csat", "nps"), "Rating"),
     (("return", "refund"), "Returns"),
+)
+
+#: Words that name a margin. A margin is profit *over* revenue, so it is not
+#: any one column and it is never summed: profit can rise in the same period a
+#: margin falls, and answering one when asked the other contradicts the question.
+_MARGIN_WORDS = (
+    "margin",
+    "margins",
+    "profitability",
+    "profit rate",
+    "markup",
 )
 
 #: How much of the total movement one dimension must concentrate before it is
@@ -65,6 +77,18 @@ def _fmt(value: float) -> str:
 
 def _signed(value: float) -> str:
     return f"{'+' if value >= 0 else '-'}{_fmt(abs(value))}"
+
+
+def _fmt_unit(value: float, unit: str) -> str:
+    """A level. A rate carries its sign of being a rate; money does not."""
+    return f"{value:,.1f}%" if unit == "%" else _fmt(value)
+
+
+def _signed_unit(value: float, unit: str) -> str:
+    """A movement. Rates move in percentage points, not percent of a percent."""
+    if unit == "%":
+        return f"{'+' if value >= 0 else '-'}{abs(value):,.1f} points"
+    return _signed(value)
 
 
 # ---------------------------------------------------------------------------
@@ -120,19 +144,199 @@ def ensure_profit(dataset: Dataset) -> Dataset:
     )
 
 
-def resolve_measure(dataset: Dataset, *questions: str | None) -> tuple[str, str] | None:
-    """Pick the measure column the question is about. Returns (column, label)."""
+@dataclasses.dataclass(frozen=True)
+class MeasureSpec:
+    """What a diagnosis is about.
+
+    A *sum* measure is one column added up over a period. A *ratio* is computed
+    from the period's totals — a margin is total profit over total revenue — so
+    it must never be summed, neither across rows nor across periods. "Total
+    margin" is not a figure, and the average of per-row margins is not the
+    period's margin.
+    """
+
+    label: str
+    kind: str  # "sum" | "ratio"
+    column: str | None = None  # the summed column
+    numerator: str | None = None
+    denominator: str | None = None
+    unit: str = ""  # "" for money and counts, "%" for a rate
+    #: False when nothing in the question named this measure and it was picked
+    #: by fallback. The answer has to say so: "how do we reduce churn" measured
+    #: on revenue is not an answer about churn.
+    matched: bool = True
+
+    @property
+    def is_ratio(self) -> bool:
+        return self.kind == "ratio"
+
+
+#: The scaffolding an advisory or diagnostic question is built from: question
+#: words, pronouns, the verbs of asking for advice, and the vocabulary of a
+#: movement. Whatever survives this is the question's *subject*.
+_QUESTION_SCAFFOLD = frozenset(
+    """
+    what how why when where which who whom whose should shall can could would will
+    do does did done doing are is was were be been being have has had
+    we i they you us our my your their the a an and or but not no nor
+    about with for from on in into to of at by as that this these those it its
+    any some most more less least best better worse worst good bad great
+    now next then soon later still yet again another other same
+    go going get getting make making take taking put keep keeping give giving
+    fix fixing solve solving improve improving increase increasing decrease
+    decreasing reduce reducing grow growing boost boosting raise raising lower
+    lowering prevent preventing avoid avoiding stop stopping address addressing
+    recover recovering recovery reverse reversing turn turning around correct
+    correcting change changing help helping handle handling deal
+    advise advice recommend recommended recommendation recommendations suggest
+    suggestion suggestions action actions step steps plan plans idea ideas
+    option options way ways thing things something anything
+    happen happened happening wrong right well badly really actually
+    business company situation performance numbers number figures figure data
+    result results overall generally
+    drop dropped drops fall fell falling fallen decline declined declining dip
+    slump loss losses losing lost spike surge jump jumped rise rose rising risen
+    growth gain gains gained collapse shortfall gap trend move movement moving
+    down up bad worse
+    """.split()
+)
+
+
+def question_subject_words(question: str | None) -> set[str]:
+    """The content words a question carries, once the scaffolding is removed.
+
+    An empty set means the question named no subject at all — "what should we
+    do" — which is a fair thing to answer on the headline figure. A non-empty
+    set that matches no measure means the question is about something this data
+    does not hold, which is not.
+    """
+    if not question:
+        return set()
+    return {
+        word
+        for word in re.findall(r"[a-z][a-z'\-]*", question.lower())
+        if len(word) > 2 and word not in _QUESTION_SCAFFOLD
+    }
+
+
+#: Questions about something that has not happened. Rows record the past, so a
+#: hypothetical or a forecast cannot be measured from them however well the
+#: subject is mapped — "should we open a new store" is not answered by the
+#: history of the stores that exist.
+_SPECULATIVE_PATTERNS = (
+    r"\bshould\s+(?:we|i|they)\s+(?:open|launch|start|build|hire|expand|enter|invest|buy|acquire|introduce|switch|close|discontinue)\b",
+    r"\b(?:if|when)\s+we\s+(?:were|did|do|open|launch|start|hire|raise|cut)\b",
+    r"\bwould\s+(?:it|we|they|that|this)\s+(?:be|make|help|work|improve|increase|reduce)\b",
+    r"\bwhat\s+(?:would|will)\s+happen\b",
+    r"\b(?:forecast|forecasts|predict|prediction|projection|projected|expected)\b",
+    r"\bnext\s+(?:year|quarter|month|week)\b",
+    r"\bhow\s+much\s+(?:would|will)\b",
+)
+
+
+def is_speculative(question: str | None) -> bool:
+    if not question:
+        return False
+    q = question.lower().strip()
+    return any(re.search(p, q) for p in _SPECULATIVE_PATTERNS)
+
+
+def asks_about_margin(*questions: str | None) -> bool:
+    return any(
+        any(w in f" {q.lower()} " for w in _MARGIN_WORDS) for q in questions if q
+    )
+
+
+def margin_columns(dataset: Dataset) -> tuple[str, str] | None:
+    """(profit column, revenue column) when a margin can honestly be computed.
+
+    `ensure_profit` has already derived profit from revenue and cost where it
+    could, so reaching here without a profit column means the data genuinely
+    cannot express a margin.
+    """
+    revenue_col = dataset.column_for("Revenue")
+    profit_col = dataset.column_for("Profit")
+    if revenue_col and profit_col and revenue_col != profit_col:
+        return profit_col, revenue_col
+    return None
+
+
+def resolve_measure_spec(dataset: Dataset, *questions: str | None) -> MeasureSpec | None:
+    """What the question is about, as something that can actually be measured.
+
+    A margin question resolves to a ratio or to nothing. It must not quietly
+    resolve to profit: on data where cost outgrew revenue, profit rises in the
+    same period the margin falls, and the answer then contradicts the question.
+    """
+    # Rows are a record of the past. A question about what has not happened is
+    # not answerable from them, however well its subject is mapped.
+    grounded = not is_speculative(questions[0] if questions else None)
+
     for question in questions:
         if not question:
             continue
         q = f" {question.lower()} "
+        if any(w in q for w in _MARGIN_WORDS):
+            pair = margin_columns(dataset)
+            if not pair:
+                return None
+            profit_col, revenue_col = pair
+            return MeasureSpec(
+                label="margin",
+                kind="ratio",
+                numerator=profit_col,
+                denominator=revenue_col,
+                unit="%",
+                matched=grounded,
+            )
         for words, canonical in _MEASURE_HINTS:
             if any(w in q for w in words):
                 column = dataset.column_for(canonical)
                 if column:
-                    return column, canonical.lower()
+                    return MeasureSpec(
+                        label=canonical.lower(),
+                        kind="sum",
+                        column=column,
+                        matched=grounded,
+                    )
+
+    # No question named a measure this data holds. Whether that is a problem
+    # depends on whether the question named a subject at all: "what should we
+    # do" has none and the headline figure answers it fairly, while "how do we
+    # reduce customer churn" names one this data cannot measure, and answering
+    # that on revenue would be answering a different question.
+    subject = question_subject_words(questions[0] if questions else None)
+    known = {word for column in dataset.columns for word in re.split(r"[\s_\-]+", column.lower())}
+    known |= {
+        word
+        for canonical in dataset.canonical
+        for word in canonical.lower().split()
+    }
+    matched = grounded and (not subject or bool(subject & known))
 
     for canonical in _MEASURE_FALLBACK:
+        column = dataset.column_for(canonical)
+        if column:
+            return MeasureSpec(
+                label=canonical.lower(), kind="sum", column=column, matched=matched
+            )
+    return None
+
+
+def resolve_measure(dataset: Dataset, *questions: str | None) -> tuple[str, str] | None:
+    """The summable column the question is about. Returns (column, label).
+
+    Used where only a column will do — the partial-context path breaks a single
+    column down by segment. `resolve_measure_spec` is the full answer.
+    """
+    spec = resolve_measure_spec(dataset, *questions)
+    if spec is not None and not spec.is_ratio:
+        return spec.column, spec.label
+
+    # A margin question, or one whose margin could not be computed. Profit is
+    # the closest thing to break down; the caller states the limitation.
+    order = ("Profit", *_MEASURE_FALLBACK) if asks_about_margin(*questions) else _MEASURE_FALLBACK
+    for canonical in order:
         column = dataset.column_for(canonical)
         if column:
             return column, canonical.lower()
@@ -161,6 +365,129 @@ def _totals_for_bucket(
             continue
         totals[label] = totals.get(label, 0.0) + value
     return totals
+
+
+def bucket_ratios(
+    dataset: Dataset, index: TimeIndex, spec: MeasureSpec
+) -> dict[str, float]:
+    """A ratio per period, computed from that period's totals.
+
+    Periods whose denominator is zero are left out entirely rather than
+    reported as 0% — a margin on no revenue is undefined, not flat.
+    """
+    numerators = bucket_totals(dataset, index, spec.numerator)
+    denominators = bucket_totals(dataset, index, spec.denominator)
+    out: dict[str, float] = {}
+    for bucket in index.buckets:
+        denominator = denominators.get(bucket.key, 0.0)
+        if denominator == 0:
+            continue
+        out[bucket.key] = numerators.get(bucket.key, 0.0) / denominator * 100
+    return out
+
+
+def attribute_ratio_change(
+    dataset: Dataset,
+    index: TimeIndex,
+    spec: MeasureSpec,
+    current_key: str,
+    previous_key: str,
+    *,
+    max_drivers: int = 4,
+) -> dict[str, Any] | None:
+    """Split a ratio move into the percentage points each segment contributed.
+
+    A segment's share of the period margin is its own profit over the *whole
+    period's* revenue. Differencing that across the two periods gives a set of
+    contributions that sum exactly to the observed move, so no share is an
+    estimate — and it captures both halves of what actually happens to a
+    blended rate: a segment's own margin changing, and a segment growing or
+    shrinking as a proportion of the mix.
+    """
+    best: dict[str, Any] | None = None
+
+    total_now = _bucket_sum(dataset, index, spec.denominator, current_key) or 0.0
+    total_before = _bucket_sum(dataset, index, spec.denominator, previous_key) or 0.0
+    if total_now == 0 or total_before == 0:
+        return None
+
+    for canonical in DIMENSION_FIELDS:
+        column = dataset.column_for(canonical)
+        if not column:
+            continue
+
+        num_now = _totals_for_bucket(dataset, index, column, spec.numerator, current_key)
+        num_before = _totals_for_bucket(dataset, index, column, spec.numerator, previous_key)
+        den_now = _totals_for_bucket(dataset, index, column, spec.denominator, current_key)
+        den_before = _totals_for_bucket(
+            dataset, index, column, spec.denominator, previous_key
+        )
+        labels = set(num_now) | set(num_before) | set(den_now) | set(den_before)
+        if len(labels) < 2 or len(labels) > 200:
+            continue
+
+        contributions = []
+        for label in labels:
+            share_now = num_now.get(label, 0.0) / total_now * 100
+            share_before = num_before.get(label, 0.0) / total_before * 100
+            contributions.append((label, share_now, share_before, share_now - share_before))
+
+        total_move = sum(abs(delta) for _, _, _, delta in contributions)
+        if total_move <= 0:
+            continue
+
+        contributions.sort(key=lambda item: abs(item[3]), reverse=True)
+        concentration = sum(abs(c[3]) for c in contributions[:2]) / total_move
+
+        if best is None or concentration > best["concentration"]:
+            drivers = []
+            for label, share_now, share_before, delta in contributions[:max_drivers]:
+                if delta == 0:
+                    continue
+                own_now = den_now.get(label)
+                own_before = den_before.get(label)
+                drivers.append(
+                    {
+                        "dimension": canonical,
+                        "label": label,
+                        # Contribution points, so current - previous == change.
+                        "current": round(share_now, 2),
+                        "previous": round(share_before, 2),
+                        "change": round(delta, 2),
+                        "change_pct": None,
+                        "share": round(abs(delta) / total_move * 100, 1),
+                        "direction": "up" if delta > 0 else "down",
+                        # The segment's own rate, which is what a reader acts on.
+                        "own_now": (
+                            round(num_now.get(label, 0.0) / own_now * 100, 1)
+                            if own_now
+                            else None
+                        ),
+                        "own_before": (
+                            round(num_before.get(label, 0.0) / own_before * 100, 1)
+                            if own_before
+                            else None
+                        ),
+                    }
+                )
+            if not drivers:
+                continue
+            best = {
+                "dimension": canonical,
+                "column": column,
+                "concentration": concentration,
+                "drivers": drivers,
+                # Denominator totals, so "stopped contributing" keeps meaning
+                # "recorded no revenue" rather than "had no margin".
+                "current_totals": den_now,
+                "previous_totals": den_before,
+            }
+
+    if best is None:
+        return None
+    if best["concentration"] < _MIN_CONCENTRATION:
+        return best if best["drivers"] else None
+    return best
 
 
 def attribute_change(
@@ -308,6 +635,55 @@ def _margin_factor(
     }
 
 
+def _margin_mechanics_factor(
+    dataset: Dataset,
+    index: TimeIndex,
+    spec: MeasureSpec,
+    current_key: str,
+    previous_key: str,
+) -> dict[str, Any] | None:
+    """Why the margin itself moved: which side of the ratio outgrew the other.
+
+    A margin only moves when revenue and cost grow at different rates. Naming
+    which one ran ahead is the mechanism — everything else is where it happened.
+    """
+    if not spec.is_ratio:
+        return None
+    revenue_col = dataset.column_for("Revenue")
+    cost_col = dataset.column_for("Cost")
+    if not revenue_col or not cost_col:
+        return None
+
+    revenue_now = _bucket_sum(dataset, index, revenue_col, current_key)
+    revenue_before = _bucket_sum(dataset, index, revenue_col, previous_key)
+    cost_now = _bucket_sum(dataset, index, cost_col, current_key)
+    cost_before = _bucket_sum(dataset, index, cost_col, previous_key)
+    if None in (revenue_now, revenue_before, cost_now, cost_before):
+        return None
+    revenue_pct = _pct(revenue_now, revenue_before)
+    cost_pct = _pct(cost_now, cost_before)
+    if revenue_pct is None or cost_pct is None:
+        return None
+
+    if cost_pct > revenue_pct:
+        mechanism = "cost outgrew revenue, which is what pulled the margin down"
+    elif cost_pct < revenue_pct:
+        mechanism = "revenue outgrew cost, which is what lifted the margin"
+    else:
+        mechanism = "cost and revenue moved together, leaving the margin unchanged"
+
+    return {
+        "kind": "margin_mechanics",
+        "detail": (
+            f"Revenue moved {_signed(revenue_now - revenue_before)} ({revenue_pct:+.0f}%) "
+            f"and cost {_signed(cost_now - cost_before)} ({cost_pct:+.0f}%), so {mechanism}."
+        ),
+        "revenue_change_pct": round(revenue_pct, 1),
+        "cost_change_pct": round(cost_pct, 1),
+        "cost_outgrew_revenue": cost_pct > revenue_pct,
+    }
+
+
 def _price_volume_factor(
     dataset: Dataset,
     index: TimeIndex,
@@ -417,24 +793,32 @@ def _coverage_factor(
 
 
 def _baseline_factor(
-    totals: dict[str, float], keys: list[str], current: float
+    totals: dict[str, float], keys: list[str], current: float, unit: str = ""
 ) -> dict[str, Any] | None:
     """Place the latest period against the trailing average, not just last period."""
     history = [totals[k] for k in keys[:-1]]
     if len(history) < 2:
         return None
     baseline = sum(history) / len(history)
-    change = _pct(current, baseline)
-    if change is None:
-        return None
+    # A rate moves in points against its baseline. "40% above a 40% margin" is
+    # a number nobody can act on.
+    if unit == "%":
+        gap, change = current - baseline, None
+    else:
+        change = _pct(current, baseline)
+        if change is None:
+            return None
+        gap = None
     return {
         "kind": "baseline",
         "detail": (
-            f"Against the {len(history)}-period trailing average of {_fmt(baseline)}, "
-            f"the latest period is {change:+.0f}%."
+            f"Against the {len(history)}-period trailing average of "
+            f"{_fmt_unit(baseline, unit)}, the latest period is "
+            + (f"{_signed_unit(gap, unit)}." if unit == "%" else f"{change:+.0f}%.")
         ),
         "baseline": round(baseline, 2),
-        "change_pct": round(change, 1),
+        "change_pct": round(change, 1) if change is not None else None,
+        "change_points": round(gap, 2) if gap is not None else None,
     }
 
 
@@ -448,6 +832,7 @@ def diagnose(
     question: str,
     *,
     previous_question: str | None = None,
+    history: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Explain how the measure in `question` moved, and what moved it.
 
@@ -461,56 +846,78 @@ def diagnose(
     if not date_col:
         return None
 
-    resolved = resolve_measure(dataset, question, previous_question)
-    if not resolved:
+    # The current question wins, then the chat's own history newest-first: a
+    # thread that has moved from revenue to margin is asking about margin now.
+    spec = resolve_measure_spec(dataset, question, *(history or []), previous_question)
+    if not spec:
         return None
-    measure_col, measure_label = resolved
+    measure_label = spec.label
 
-    index = build_time_index(dataset, date_col)
+    # Not `build_time_index`: that one buckets for a readable trend line, which
+    # on a short span is one point per day. Comparing the last two of those
+    # compares two trading days, not two periods.
+    index = build_comparison_index(dataset, date_col)
     if index is None or len(index.buckets) < 2:
         return None
 
-    totals = bucket_totals(dataset, index, measure_col)
-    keys = [b.key for b in index.buckets]
+    if spec.is_ratio:
+        totals = bucket_ratios(dataset, index, spec)
+        periods = [b for b in index.buckets if b.key in totals]
+    else:
+        totals = bucket_totals(dataset, index, spec.column)
+        periods = list(index.buckets)
+    if len(periods) < 2:
+        return None
+
+    keys = [b.key for b in periods]
     current_key, previous_key = keys[-1], keys[-2]
     current, previous = totals[current_key], totals[previous_key]
     if current == 0 and previous == 0:
         return None
 
     change = current - previous
-    change_pct = _pct(current, previous)
+    # A rate moves in percentage points. The percent change *of* a percentage
+    # ("margin fell 136%") is a number no one can act on, so it is not reported.
+    change_pct = None if spec.is_ratio else _pct(current, previous)
     direction = "flat" if abs(change) < 1e-9 else ("down" if change < 0 else "up")
 
-    attribution = attribute_change(dataset, index, measure_col, current_key, previous_key)
+    if spec.is_ratio:
+        attribution = attribute_ratio_change(dataset, index, spec, current_key, previous_key)
+    else:
+        attribution = attribute_change(dataset, index, spec.column, current_key, previous_key)
 
     factors: list[dict[str, Any]] = []
     for factor in (
         _coverage_factor(index, current_key, previous_key),
+        _margin_mechanics_factor(dataset, index, spec, current_key, previous_key),
         _price_volume_factor(
             dataset, index, measure_label, current_key, previous_key, current, previous
         ),
         _margin_factor(dataset, index, measure_label, current_key, previous_key),
         _churn_factor(attribution),
-        _baseline_factor(totals, keys, current),
+        _baseline_factor(totals, keys, current, spec.unit),
     ):
         if factor:
             factors.append(factor)
 
     series = [
         {"period": bucket.label, "value": round(totals[bucket.key], 2)}
-        for bucket in index.buckets
+        for bucket in periods
     ]
 
     return {
-        "measure": measure_col,
+        "measure": spec.column or f"{spec.numerator} / {spec.denominator}",
         "measure_label": measure_label,
+        "measure_kind": spec.kind,
+        "unit": spec.unit,
+        "measure_matched": spec.matched,
         "direction": direction,
         "current": round(current, 2),
         "previous": round(previous, 2),
         "change": round(change, 2),
         "change_pct": round(change_pct, 1) if change_pct is not None else None,
-        "period_label": index.buckets[-1].label,
-        "previous_label": index.buckets[-2].label,
+        "period_label": periods[-1].label,
+        "previous_label": periods[-2].label,
         "granularity": index.granularity,
         "dimension": attribution["dimension"] if attribution else None,
         "concentration": (
@@ -530,23 +937,35 @@ def diagnose(
 # ---------------------------------------------------------------------------
 
 
+#: Said when the question named something the data does not measure. Without
+#: it, "how do we reduce churn" comes back as revenue advice that never
+#: mentions churn — the same failure the SQL path guards with UNTARGETED.
+UNMEASURED_PREFIX = (
+    "This data does not carry a figure for what you asked about, so I cannot "
+    "answer that question directly from it. What it does show is this:"
+)
+
+
 def render_diagnosis(diagnosis: dict[str, Any], *, source_name: str | None = None) -> str:
     measure = diagnosis["measure_label"]
     where = f" in {source_name}" if source_name else ""
+    unit = diagnosis.get("unit", "")
     change_pct = diagnosis["change_pct"]
     pct_text = f" ({change_pct:+.0f}%)" if change_pct is not None else ""
 
     if diagnosis["direction"] == "flat":
         lead = (
-            f"{measure.capitalize()}{where} held steady at {_fmt(diagnosis['current'])} "
-            f"in {diagnosis['period_label']}, level with {diagnosis['previous_label']}."
+            f"{measure.capitalize()}{where} held steady at "
+            f"{_fmt_unit(diagnosis['current'], unit)} in {diagnosis['period_label']}, "
+            f"level with {diagnosis['previous_label']}."
         )
     else:
         verb = "fell" if diagnosis["direction"] == "down" else "rose"
         lead = (
-            f"{measure.capitalize()}{where} {verb} from {_fmt(diagnosis['previous'])} in "
-            f"{diagnosis['previous_label']} to {_fmt(diagnosis['current'])} in "
-            f"{diagnosis['period_label']}, a move of {_signed(diagnosis['change'])}{pct_text}."
+            f"{measure.capitalize()}{where} {verb} from "
+            f"{_fmt_unit(diagnosis['previous'], unit)} in {diagnosis['previous_label']} to "
+            f"{_fmt_unit(diagnosis['current'], unit)} in {diagnosis['period_label']}, "
+            f"a move of {_signed_unit(diagnosis['change'], unit)}{pct_text}."
         )
 
     sentences = [lead]
@@ -557,19 +976,38 @@ def render_diagnosis(diagnosis: dict[str, Any], *, source_name: str | None = Non
         same_way = [d for d in drivers if d["direction"] == diagnosis["direction"]]
         listed = (same_way or drivers)[:2]
         parts = [
-            f"{d['label']} ({_signed(d['change'])}, {d['share']:.0f}% of the movement)"
+            f"{d['label']} ({_signed_unit(d['change'], unit)}, "
+            f"{d['share']:.0f}% of the movement)"
             for d in listed
         ]
         sentences.append(f"The move is concentrated by {dimension}: {', '.join(parts)}.")
+        # For a rate the driver figure is a contribution, not the segment's own
+        # rate. Saying which is which is the difference between a reader
+        # trusting the number and misreading it.
+        if unit == "%":
+            own = [d for d in listed if d.get("own_before") is not None and d.get("own_now") is not None]
+            if own:
+                sentences.append(
+                    "Those are contributions to the blended figure; on its own, "
+                    + ", ".join(
+                        f"{d['label']} went from {d['own_before']:,.1f}% to {d['own_now']:,.1f}%"
+                        for d in own[:2]
+                    )
+                    + "."
+                )
         offset = [d for d in drivers if d["direction"] != diagnosis["direction"]]
         if offset:
             best = offset[0]
             sentences.append(
-                f"Working the other way, {best['label']} moved {_signed(best['change'])}."
+                f"Working the other way, {best['label']} moved "
+                f"{_signed_unit(best['change'], unit)}."
             )
 
     for factor in diagnosis.get("factors", [])[:2]:
         sentences.append(factor["detail"])
+
+    if not diagnosis.get("measure_matched", True):
+        sentences.insert(0, UNMEASURED_PREFIX)
 
     return " ".join(sentences)
 
@@ -623,6 +1061,25 @@ def build_recommendations(diagnosis: dict[str, Any]) -> list[dict[str, str]]:
     factors = {f["kind"]: f for f in diagnosis.get("factors", [])}
     drivers = diagnosis.get("drivers") or []
     dimension = str(diagnosis.get("dimension") or "").lower()
+    unit = diagnosis.get("unit", "")
+
+    # Advice about the wrong subject is worse than none. When the question named
+    # something the data does not measure, the first action is to make it
+    # measurable — everything below is about a different figure.
+    if not diagnosis.get("measure_matched", True):
+        out.append(
+            _recommendation(
+                "Connect the data this question needs",
+                "The subject of your question is not measured in the connected data, "
+                f"so the only figure available is {measure}. Add or map the column "
+                "that records it, then ask again — the actions below are about "
+                f"{measure}, not about what you asked.",
+                f"No column on this source maps to the subject of the question; "
+                f"{measure} was used as the headline figure instead.",
+                "now",
+                kind="coverage_gap",
+            )
+        )
 
     # An incomplete latest period outranks everything: fix the data first.
     if factors.get("coverage"):
@@ -649,7 +1106,7 @@ def build_recommendations(diagnosis: dict[str, Any]) -> list[dict[str, str]]:
                 "changed there this period - demand, availability, pricing, staffing or a lost "
                 f"account - before spreading effort across the rest of the "
                 f"{dimension or 'business'}.",
-                f"{worst['label']} moved {_signed(worst['change'])}, "
+                f"{worst['label']} moved {_signed_unit(worst['change'], unit)}, "
                 f"{worst['share']:.0f}% of the total movement.",
                 "now",
                 kind="driver",
@@ -662,7 +1119,7 @@ def build_recommendations(diagnosis: dict[str, Any]) -> list[dict[str, str]]:
                     f"Check whether {second['label']} shares the same cause",
                     f"{second['label']} moved the same way. If both fell for one reason, fix "
                     "that reason once; if not, they need separate responses.",
-                    f"{second['label']} moved {_signed(second['change'])} "
+                    f"{second['label']} moved {_signed_unit(second['change'], unit)} "
                     f"({second['share']:.0f}% of the movement).",
                     "next",
                     kind="driver",
@@ -709,6 +1166,33 @@ def build_recommendations(diagnosis: dict[str, Any]) -> list[dict[str, str]]:
                 )
             )
 
+    mechanics = factors.get("margin_mechanics")
+    if mechanics and direction == "down":
+        if mechanics["cost_outgrew_revenue"]:
+            out.append(
+                _recommendation(
+                    "Close the gap between cost and revenue growth",
+                    "Cost is growing faster than revenue, which is the whole of the "
+                    "margin move. Separate input cost from discounting before choosing "
+                    "a response — they need opposite fixes.",
+                    mechanics["detail"],
+                    "now",
+                    kind="margin",
+                )
+            )
+        else:
+            out.append(
+                _recommendation(
+                    "Check the mix, not the rates",
+                    "Revenue outgrew cost, so the blended margin fell because the mix "
+                    "shifted towards thinner-margin lines. Confirm which lines gained "
+                    "share before treating this as a cost problem.",
+                    mechanics["detail"],
+                    "now",
+                    kind="margin_mix",
+                )
+            )
+
     margin = factors.get("margin")
     if margin and margin.get("squeezed"):
         cause = (
@@ -734,7 +1218,7 @@ def build_recommendations(diagnosis: dict[str, Any]) -> list[dict[str, str]]:
                 f"Repeat what worked in {best['label']}",
                 "Establish whether the gain is repeatable or one-off, then apply the same "
                 f"change to the rest of the {dimension or 'business'} while it still counts.",
-                f"{best['label']} moved {_signed(best['change'])}, "
+                f"{best['label']} moved {_signed_unit(best['change'], unit)}, "
                 f"{best['share']:.0f}% of the total movement.",
                 "now",
                 kind="driver",
@@ -748,7 +1232,7 @@ def build_recommendations(diagnosis: dict[str, Any]) -> list[dict[str, str]]:
                 f"Borrow from {best['label']}",
                 f"{best['label']} grew while the rest fell. Find out what it did differently "
                 "and apply it to the segments that dropped.",
-                f"{best['label']} moved {_signed(best['change'])} against the trend.",
+                f"{best['label']} moved {_signed_unit(best['change'], unit)} against the trend.",
                 "next",
                 kind="offset",
             )
@@ -761,7 +1245,7 @@ def build_recommendations(diagnosis: dict[str, Any]) -> list[dict[str, str]]:
             f"Track {measure} per {guard_dimension} every {diagnosis['granularity']} and set "
             "an alert on a repeat move of this size, so the next one surfaces while it can "
             "still be acted on.",
-            f"{measure.capitalize()} moved {_signed(diagnosis['change'])} in one "
+            f"{measure.capitalize()} moved {_signed_unit(diagnosis['change'], unit)} in one "
             f"{diagnosis['granularity']}.",
             "watch",
             kind="monitoring",
@@ -794,6 +1278,9 @@ Rules:
 - Be explicit that these are the segments the change is concentrated in. The data
   shows WHERE the change happened; it does not prove WHY. Do not state a business
   cause as fact - suggest what to check.
+- If the evidence says nothing in the question named the measure, open by saying
+  the data cannot answer that question, then give what it does show. Never let a
+  fallback figure stand in for a subject the data does not measure.
 - 3-5 sentences. Plain English. No markdown, no bullets, no preamble.
 """
 
@@ -814,6 +1301,10 @@ Rules:
 - Keep, merge or sharpen the candidate actions; drop any the evidence does not
   support. Do not recommend anything the evidence cannot justify.
 - Never claim to know the cause. Recommend what to check, fix, or watch.
+- If the evidence says nothing in the question named the measure, the first
+  sentence of "answer" must say the data cannot answer that question, and the
+  recommendations must be about the figures you were given - never dressed up as
+  advice on the subject that was asked about.
 """
 
 
@@ -824,8 +1315,13 @@ def build_evidence_prompt(
     source_name: str | None = None,
     currency: str | None = None,
     candidates: list[dict[str, str]] | None = None,
+    context_block: str | None = None,
 ) -> str:
     lines = [f"Question: {question}"]
+    # "What should we do about it?" only means something against the turn
+    # before it. The evidence below is still the only source of figures.
+    if context_block and context_block.strip():
+        lines.extend(["", context_block.strip(), ""])
     if source_name:
         lines.append(f"Data source: {source_name}")
     if currency:
@@ -835,13 +1331,29 @@ def build_evidence_prompt(
         )
 
     change_pct = diagnosis["change_pct"]
+    unit = diagnosis.get("unit", "")
     lines.append("")
     lines.append("EVIDENCE")
     lines.append(f"Measure: {diagnosis['measure_label']} (column {diagnosis['measure']})")
+    if not diagnosis.get("measure_matched", True):
+        lines.append(
+            "IMPORTANT: nothing in the question named this measure. It is the "
+            "headline figure on this data, chosen because the subject of the "
+            "question is not measured here at all. Your answer MUST open by "
+            "saying plainly that the data cannot answer the question that was "
+            "asked, and must not imply the figures below are about that subject."
+        )
+    if unit == "%":
+        lines.append(
+            "This measure is a RATE, computed from each period's totals. It moves in "
+            "percentage points, never in percent or in currency. Never total it across "
+            "periods or segments."
+        )
     lines.append(
-        f"Latest period {diagnosis['period_label']}: {_fmt(diagnosis['current'])}; "
-        f"previous period {diagnosis['previous_label']}: {_fmt(diagnosis['previous'])}; "
-        f"change {_signed(diagnosis['change'])}"
+        f"Latest period {diagnosis['period_label']}: {_fmt_unit(diagnosis['current'], unit)}; "
+        f"previous period {diagnosis['previous_label']}: "
+        f"{_fmt_unit(diagnosis['previous'], unit)}; "
+        f"change {_signed_unit(diagnosis['change'], unit)}"
         + (f" ({change_pct:+.1f}%)" if change_pct is not None else "")
     )
     lines.append(f"Period granularity: {diagnosis['granularity']}")
@@ -851,7 +1363,9 @@ def build_evidence_prompt(
         recent = series[-8:]
         lines.append(
             "Series (oldest first): "
-            + ", ".join(f"{point['period']}={_fmt(point['value'])}" for point in recent)
+            + ", ".join(
+                f"{point['period']}={_fmt_unit(point['value'], unit)}" for point in recent
+            )
         )
 
     drivers = diagnosis.get("drivers") or []
@@ -861,13 +1375,26 @@ def build_evidence_prompt(
             f"(this dimension holds {diagnosis['concentration']:.0f}% of the movement "
             "in its top two segments):"
         )
+        if unit == "%":
+            lines.append(
+                "  Each segment's figures below are its CONTRIBUTION to the blended "
+                "rate in percentage points, which is why they sum to the total move. "
+                "'own rate' is that segment's rate measured on its own."
+            )
         for driver in drivers:
             pct = driver["change_pct"]
+            own = ""
+            if driver.get("own_before") is not None and driver.get("own_now") is not None:
+                own = (
+                    f"; own rate {driver['own_before']:,.1f}% -> {driver['own_now']:,.1f}%"
+                )
             lines.append(
-                f"- {driver['label']}: {_fmt(driver['previous'])} -> {_fmt(driver['current'])}, "
-                f"change {_signed(driver['change'])}"
+                f"- {driver['label']}: {_fmt_unit(driver['previous'], unit)} -> "
+                f"{_fmt_unit(driver['current'], unit)}, "
+                f"change {_signed_unit(driver['change'], unit)}"
                 + (f" ({pct:+.0f}%)" if pct is not None else "")
                 + f", {driver['share']:.0f}% of the total movement"
+                + own
             )
     else:
         lines.append("No dimension concentrated the movement; it is spread across segments.")
@@ -948,6 +1475,10 @@ def diagnosis_result_payload(diagnosis: dict[str, Any]) -> dict[str, Any]:
     answer supports the same follow-through as a normal one.
     """
     measure = diagnosis["measure_label"].replace(" ", "_")
+    # A rate is charted on its own axis and never totalled; the name is what
+    # tells the chart and the table which it is.
+    if diagnosis.get("unit") == "%" and not measure.endswith("_pct"):
+        measure = f"{measure}_pct"
     return {
         "columns": ["period", measure],
         "rows": [
@@ -991,6 +1522,7 @@ def build_partial_context(
     question: str,
     *,
     previous_question: str | None = None,
+    history: list[str] | None = None,
     max_labels: int = 8,
 ) -> dict[str, Any] | None:
     """What the data can show about the question, and what it cannot.
@@ -1003,7 +1535,7 @@ def build_partial_context(
         return None
 
     limits: list[str] = []
-    resolved = resolve_measure(dataset, question, previous_question)
+    resolved = resolve_measure(dataset, question, *(history or []), previous_question)
     measure_col, measure_label = resolved if resolved else (None, None)
     if not resolved:
         limits.append(

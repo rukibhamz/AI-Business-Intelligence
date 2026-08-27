@@ -43,6 +43,12 @@ from app.services.schema_context import (
 )
 from app.services.schema_registry import parse_connection_config
 from app.services.sql_sandbox import ensure_limit, validate_readonly_sql
+from app.services.web_research import (
+    PRACTICE_SYSTEM,
+    SearchResult,
+    build_practice_prompt,
+    parse_practices,
+)
 
 #: Mode reported when the offline planner fell back to a plain row dump. The
 #: rows are real, but they do not answer the question, and the answer says so.
@@ -162,6 +168,7 @@ async def generate_sql(
     model: str | None = None,
     base_url: str | None = None,
     previous_question: str | None = None,
+    context_block: str | None = None,
     analysis_plan: AnalysisPlan | None = None,
 ) -> tuple[str, str]:
     """Returns (sql, mode) where mode is 'openai' or 'heuristic'."""
@@ -181,6 +188,7 @@ async def generate_sql(
             model=mdl,
             base_url=url,
             previous_question=previous_question,
+            context_block=context_block,
             analysis_plan=plan,
         )
         return sql, "openai"
@@ -202,6 +210,7 @@ async def generate_workspace_sql(
     model: str | None = None,
     base_url: str | None = None,
     previous_question: str | None = None,
+    context_block: str | None = None,
     analysis_plan: AnalysisPlan | None = None,
 ) -> tuple[DataSource, str, str]:
     """Pick a source + SQL for a workspace question. Returns (source, sql, mode)."""
@@ -224,6 +233,7 @@ async def generate_workspace_sql(
             model=mdl,
             base_url=url,
             previous_question=previous_question,
+            context_block=context_block,
             analysis_plan=plan,
         )
         by_id = {s.id: s for s in sources}
@@ -239,6 +249,7 @@ async def generate_workspace_sql(
             model=mdl,
             base_url=url,
             previous_question=previous_question,
+            context_block=context_block,
             analysis_plan=plan,
         )
         return source, sql, "openai"
@@ -261,10 +272,11 @@ async def _openai_sql(
     model: str,
     base_url: str,
     previous_question: str | None = None,
+    context_block: str | None = None,
     analysis_plan: AnalysisPlan | None = None,
 ) -> str:
     schema_text = build_schema_prompt(source)
-    ask = question_prompt_block(question, previous_question)
+    ask = question_prompt_block(question, previous_question, context_block)
     plan = analysis_plan or heuristic_analysis_plan(
         question, previous_question=previous_question
     )
@@ -287,10 +299,11 @@ async def _openai_workspace_sql(
     model: str,
     base_url: str,
     previous_question: str | None = None,
+    context_block: str | None = None,
     analysis_plan: AnalysisPlan | None = None,
 ) -> tuple[int, str]:
     catalog = build_workspace_schema_prompt(sources)
-    ask = question_prompt_block(question, previous_question)
+    ask = question_prompt_block(question, previous_question, context_block)
     plan = analysis_plan or heuristic_analysis_plan(
         question, previous_question=previous_question
     )
@@ -419,6 +432,7 @@ async def build_question_plan(
     question: str,
     *,
     previous_question: str | None,
+    context_block: str | None = None,
     api_key: str | None,
     model: str | None,
     base_url: str | None,
@@ -434,6 +448,7 @@ async def build_question_plan(
         question,
         schema_text=schema_text,
         previous_question=previous_question,
+        context_block=context_block,
         api_key=api_key,
         model=model,
         base_url=base_url,
@@ -743,6 +758,7 @@ async def generate_diagnostic_answer(
     base_url: str | None = None,
     source_name: str | None = None,
     currency: str | None = None,
+    context_block: str | None = None,
 ) -> tuple[str | None, list[dict[str, str]]]:
     """Write up a measured diagnosis, and for advisory questions, the actions.
 
@@ -763,6 +779,7 @@ async def generate_diagnostic_answer(
         source_name=source_name,
         currency=currency,
         candidates=candidates if advisory else None,
+        context_block=context_block,
     )
 
     payload = {
@@ -850,3 +867,56 @@ async def generate_partial_answer(
         return None
 
     return sanitize_narrative(content) or None
+
+
+async def generate_practices(
+    question: str,
+    finding: str,
+    results: list[SearchResult],
+    *,
+    api_key: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> list[dict[str, str]]:
+    """Read retrieved search results into cited practices.
+
+    The model never sees the customer's rows on this path, and the measured
+    answer is already written by the time it runs — so nothing it returns can
+    change a figure. Anything unusable yields [], and the answer is simply the
+    measured one, which is what it was before this lane existed.
+    """
+    key = api_key if api_key is not None else settings.openai_api_key
+    if not key or not results:
+        return []
+
+    payload = {
+        "model": model or settings.openai_model,
+        "temperature": 0.2,
+        "max_tokens": 700,
+        "messages": [
+            {"role": "system", "content": PRACTICE_SYSTEM},
+            {
+                "role": "user",
+                "content": build_practice_prompt(finding, results, question=question),
+            },
+        ],
+    }
+    url = base_url or settings.openai_base_url
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            res = await client.post(
+                f"{url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            res.raise_for_status()
+            content = res.json()["choices"][0]["message"]["content"]
+    except Exception:
+        return []
+
+    # Citation check: a URL the search did not return is not in `results`, so a
+    # practice quoting one is dropped rather than shown.
+    return parse_practices(content, results)

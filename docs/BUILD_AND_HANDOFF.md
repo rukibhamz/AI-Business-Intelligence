@@ -40,8 +40,8 @@ AI-Business-Intelligence/
 
 | Field | Value |
 |-------|-------|
-| **Last updated** | 2026-08-26 |
-| **Last agent/session** | Supabase Storage for durable uploads + Ask AI card padding |
+| **Last updated** | 2026-08-27 |
+| **Last agent/session** | Margin accuracy, period granularity, advisory honesty guard, multi-turn context, Brave-backed practice lane |
 | **Active phase** | Phase 6 — mostly complete (see §3 Phase 6 table) |
 | **Phase status** | Phases 1–5 validated against the code; deploy artifacts in place |
 | **Blockers** | None for a soft launch. Open gaps listed in `docs/DEPLOYMENT.md` §6 |
@@ -338,6 +338,74 @@ AI-Business-Intelligence/
       be re-uploaded once Storage is enabled (see `docs/DEPLOYMENT.md` §5).
 - [x] **Ask AI diagnosis card padding** — body content inset to match the header
 
+- [x] **Critical fix: a margin question was answered about profit.** `_MEASURE_HINTS`
+      mapped "margin" onto the canonical Profit field, so "what should we do about
+      the margin?" reported the profit column. On data where cost outgrows revenue
+      those move in *opposite* directions — measured on a fixture where margin fell
+      18.75% → 15.00%, the answer said profit rose 111%, contradicting the premise
+      of the question. Margin is now a first-class **ratio measure**
+      (`MeasureSpec`, `resolve_measure_spec`): computed per period as total profit
+      over total revenue, never summed, reported in **percentage points** rather
+      than currency or percent-of-a-percent. Segment attribution uses a
+      contribution decomposition (`attribute_ratio_change`) whose parts sum exactly
+      to the observed move, and each driver also carries its own rate, because a
+      contribution and a rate are different numbers and a reader needs to know
+      which is which. A margin question on data with no cost column returns no
+      diagnosis rather than answering about something else
+- [x] **A short dataset no longer compares two trading days.** `_granularity` sends
+      any span ≤ 62 days to daily buckets — right for a trend line, wrong for
+      "latest period vs the one before", which then compared the last two *days*
+      that happened to have rows. A quiet final day read as a collapse, and the
+      advice said the measure "moved in one day". `build_comparison_index` is a
+      separate ladder (year → month → week → day) that starts at the span's natural
+      size and steps finer only when that leaves fewer than two buckets — so three
+      weeks inside one calendar month becomes three weekly buckets. Chart
+      granularity is untouched
+- [x] **Advisory answers stopped answering questions they were not asked.**
+      "How can we reduce customer churn" and "should we open a new store in Kano?"
+      both fell through `_MEASURE_FALLBACK` to revenue and returned byte-identical
+      revenue-movement advice, with nothing saying the question had not been
+      addressed — the `UNTARGETED` failure mode, reappearing at the advisory layer.
+      `MeasureSpec.matched` now distinguishes three cases: the question named a
+      measure the data holds (answer it), the question named no subject at all —
+      "what should we do" — (the headline figure answers it fairly), or the
+      question named a subject this data does not measure (say so). Speculative
+      questions — hypotheticals, forecasts, "next quarter" — are in the third case
+      whatever their subject, because rows record the past. The disclosure is
+      enforced in the deterministic renderer, the evidence prompt and both system
+      prompts, and the first recommended action becomes "connect the data this
+      question needs"
+- [x] **Follow-ups carry the conversation, not just the last question's text**
+      (`services/conversation_context.py`) — previously one turn of *question text*
+      travelled forward, so "why?" after "which store led in February?" lost both
+      the store and the month, and the third question in a chat could not refer to
+      the first. Question, answer, result columns, named entities, SQL and
+      diagnosis are all already persisted on `queries`; they are now read back as
+      `Turn`s and rendered into a compact transcript block that goes into the
+      planner, the SQL prompt and the diagnostic/advisory evidence prompt. The
+      block is explicitly labelled context-for-resolving-references so the model
+      resolves "it" from history but never answers *from* stale figures. Measure
+      resolution reads the transcript newest-first, so a chat that moves from
+      revenue to margin is asking about margin now. No migration — the data was
+      always there
+- [x] **A retrieved practice lane on advisory answers** (`services/web_research.py`)
+      — `build_recommendations` is deliberately seven arithmetic templates, which
+      is why the numbers can be trusted and also why "how do we improve sales"
+      could never say anything new. Answers now carry two clearly separated lanes:
+      the **measured** one (unchanged, from the customer's rows) and a **practice**
+      one — general guidance retrieved from the **Brave Search API**, each item
+      cited to a link, rendered in its own dashed card headed "What usually works ·
+      From outside sources, not from your data". Three properties make the
+      separation hold: the search query is built from the *diagnosis* rather than
+      the raw question, so it retrieves the measured pattern instead of listicles;
+      every practice must cite a URL that came back in that same request, and
+      `parse_practices` drops any that does not, which makes a fabricated source
+      impossible rather than merely discouraged; and the prompt forbids stating any
+      figure about the business. Search results are treated as untrusted
+      third-party data, never instructions. Off unless `BRAVE_SEARCH_API_KEY` is
+      set (or an admin adds it under Settings → Web research), and every failure
+      path returns nothing, so a search outage can never sink a measured answer
+
 > **Existing sources need a one-off recompute** to gain profiles — open Data
 > Sources and press **Recompute** (new uploads profile automatically).
 
@@ -349,6 +417,19 @@ AI-Business-Intelligence/
 3. Close the gaps in `docs/DEPLOYMENT.md` §6 before treating this as production-grade
 4. Optional accuracy follow-ups: SQL result shape check vs plan slots; richer
    offline planner coverage without an API key
+5. Follow-up work now visible from the accuracy pass:
+   - **Scoped diagnosis.** "Why?" after "which store led in February?" still
+     diagnoses the whole dataset. The transcript reaches the prompt, but the
+     comparison is not filtered to the segment or period the user meant. Filtering
+     was left out deliberately: answering a *narrower* question than the one asked
+     is the same class of error the guards above remove, so it needs a deliberate
+     design rather than a heuristic
+   - **Other ratio measures.** Return rate, target attainment and campaign ROI are
+     rates too, and the `MeasureSpec` ratio path now exists for them; only margin
+     is wired up
+   - **Industry hint for the practice lane.** `build_research_query` accepts an
+     `industry` argument that nothing supplies yet; a workspace-level setting
+     would sharpen every retrieval
 
 **Default credentials:** `admin@local.dev` / `admin123`
 
@@ -412,6 +493,7 @@ values are still at their defaults.
 | `SECRET_KEY` | JWT signing (Phase 3) |
 | `OPENAI_API_KEY` | AI queries (Phase 4) |
 | `CORS_ORIGINS` | Frontend URL(s) |
+| `BRAVE_SEARCH_API_KEY` | Optional. Turns on the retrieved practice lane on advice answers |
 
 ---
 

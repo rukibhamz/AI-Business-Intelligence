@@ -14,6 +14,7 @@ from app.models import Query as QueryModel
 from app.schemas import (
     ChartRecommendation,
     Diagnosis,
+    Practice,
     QueryCreate,
     QueryResponse,
     QueryResultPayload,
@@ -26,6 +27,7 @@ from app.services.ai_query import (
     generate_diagnostic_answer,
     generate_narrative,
     generate_partial_answer,
+    generate_practices,
     generate_sql,
     generate_workspace_sql,
     pack_result,
@@ -35,8 +37,17 @@ from app.services.analytics import load_dataset
 from app.services.app_settings import (
     get_ai_runtime,
     get_currency,
+    get_research_runtime,
     list_failover_runtimes,
     load_app_settings,
+)
+from app.services.conversation_context import (
+    build_context_block,
+    context_questions,
+    load_recent_turns,
+)
+from app.services.conversation_context import (
+    previous_question as last_question,
 )
 from app.services.diagnostics import (
     build_partial_context,
@@ -59,6 +70,8 @@ from app.services.response_planner import (
     plan_response,
 )
 from app.services.schema_context import pick_source_for_question, schema_as_json
+from app.services.web_research import build_research_query
+from app.services.web_research import search as web_search
 
 router = APIRouter(prefix="/queries", tags=["queries"])
 
@@ -97,6 +110,8 @@ def query_to_response(
     # drivers and the recommended actions, not just the sentence.
     diagnosis: Diagnosis | None = None
     recommendations: list[Recommendation] = []
+    practices: list[Practice] = []
+    research_query: str | None = None
     if query.diagnosis_json:
         try:
             stored = json.loads(query.diagnosis_json)
@@ -109,6 +124,12 @@ def query_to_response(
             for item in stored.get("recommendations", [])
             if isinstance(item, dict)
         ]
+        practices = [
+            Practice(**item)
+            for item in stored.get("practices", [])
+            if isinstance(item, dict)
+        ]
+        research_query = stored.get("research_query")
 
     return QueryResponse(
         id=query.id,
@@ -126,41 +147,18 @@ def query_to_response(
         response_format=response_format,
         diagnosis=diagnosis,
         recommendations=recommendations,
+        practices=practices,
+        research_query=research_query,
     )
 
 
-async def _previous_question(
-    db: AsyncSession, session_id: str | None, user: User
-) -> str | None:
-    """The last thing asked in this chat.
-
-    "What should we do about it?" names no metric. The question before it does,
-    so a follow-up inherits its subject instead of guessing.
-    """
-    if not session_id:
-        return None
-    previous = (
-        await db.execute(
-            owned_by(
-                select(QueryModel).where(QueryModel.session_id == session_id),
-                QueryModel,
-                user,
-            )
-            .order_by(QueryModel.created_at.desc())
-            .limit(2)
-        )
-    ).scalars().all()
-    for item in previous:
-        if item.natural_language and item.status != "running":
-            return item.natural_language
-    return None
 
 
 async def _analyse(
     sources: list[DataSource],
     question: str,
     *,
-    previous_question: str | None,
+    history: list[str],
     max_sources: int = 3,
 ) -> tuple[DataSource, dict | None, dict | None] | None:
     """Look for a source that can explain the move; settle for one that can't.
@@ -185,14 +183,12 @@ async def _analyse(
         except Exception:  # an unreadable source should not sink the answer
             continue
 
-        diagnosis = diagnose(dataset, question, previous_question=previous_question)
+        diagnosis = diagnose(dataset, question, history=history)
         if diagnosis:
             return source, diagnosis, None
 
         if fallback is None:
-            context = build_partial_context(
-                dataset, question, previous_question=previous_question
-            )
+            context = build_partial_context(dataset, question, history=history)
             if context:
                 fallback = (source, None, context)
 
@@ -348,12 +344,19 @@ async def run_query(
         # answered by one SELECT over one period. Those go to the diagnostic
         # path, which compares periods and attributes the change before it
         # writes a word. Anything it cannot diagnose falls through to SQL.
+        # The chat so far. Loaded once: the diagnostic path resolves the
+        # measure from it, and the SQL path resolves what "it" refers to.
+        turns = await load_recent_turns(db, payload.session_id, current_user)
+        history = context_questions(turns)
+        previous = last_question(turns)
+        context_block = build_context_block(turns)
+
         analysis = None
         if intent in ("diagnostic", "advisory"):
             analysis = await _analyse(
                 sources,
                 payload.natural_language,
-                previous_question=await _previous_question(db, payload.session_id, current_user),
+                history=history,
             )
 
         if analysis is not None and analysis[1] is not None:
@@ -374,6 +377,7 @@ async def run_query(
                 base_url=runtime["base_url"],
                 source_name=source.name,
                 currency=await get_currency(db),
+                context_block=context_block,
             )
             mode = "diagnostic+model" if answer else "diagnostic"
             # The measured actions stand on their own; the model only rewords them.
@@ -386,6 +390,33 @@ async def run_query(
                     else render_diagnosis(diagnosis, source_name=source.name)
                 )
 
+            # The practice lane. It runs only for a question that asked for
+            # advice, only after the measured answer is written, and only when a
+            # search key is configured. Nothing it returns can change a figure:
+            # the model on this path never sees a row, and every practice it
+            # keeps must cite a URL the search actually returned.
+            practices: list[dict[str, str]] = []
+            research_query: str | None = None
+            if advisory:
+                research = await get_research_runtime(db)
+                if research:
+                    research_query = build_research_query(
+                        payload.natural_language, diagnosis
+                    )
+                    results = await web_search(
+                        research_query,
+                        api_key=research["api_key"],
+                        country=research["country"] or None,
+                    )
+                    practices = await generate_practices(
+                        payload.natural_language,
+                        render_diagnosis(diagnosis, source_name=source.name),
+                        results,
+                        api_key=runtime["api_key"],
+                        model=runtime["model"],
+                        base_url=runtime["base_url"],
+                    )
+
             result = diagnosis_result_payload(diagnosis)
             query.generated_sql = None
             query.result_json = pack_result(result)
@@ -393,7 +424,12 @@ async def run_query(
             query.response_format = "diagnostic"
             query.answer = answer
             query.diagnosis_json = json.dumps(
-                {"diagnosis": diagnosis, "recommendations": recommendations},
+                {
+                    "diagnosis": diagnosis,
+                    "recommendations": recommendations,
+                    "practices": practices,
+                    "research_query": research_query,
+                },
                 default=str,
             )
 
@@ -440,8 +476,6 @@ async def run_query(
             await _finalize(db, query, payload, current_user)
             return query_to_response(query, mode=mode, explanation=explanation)
 
-        previous = await _previous_question(db, payload.session_id, current_user)
-
         async def plan_and_write_sql(active: dict[str, str]):
             """Everything that needs a model. Retried against the next provider."""
             plan_for_question = await build_question_plan(
@@ -449,6 +483,7 @@ async def run_query(
                 sources,
                 payload.natural_language,
                 previous_question=previous,
+                context_block=context_block,
                 api_key=active["api_key"],
                 model=active["model"],
                 base_url=active["base_url"],
@@ -461,6 +496,7 @@ async def run_query(
                     model=active["model"],
                     base_url=active["base_url"],
                     previous_question=previous,
+                    context_block=context_block,
                     analysis_plan=plan_for_question,
                 )
                 return pinned, written, written_mode, plan_for_question

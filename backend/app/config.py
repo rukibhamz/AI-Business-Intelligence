@@ -211,6 +211,14 @@ class Settings(BaseSettings):
     #: Private Storage bucket for uploaded CSV/Excel files.
     supabase_storage_bucket: str = "datasets"
 
+    # --- web research -------------------------------------------------------
+    #: Brave Search API subscription token. Set it to turn on the practice lane
+    #: on advisory answers — outside guidance, retrieved and cited, alongside
+    #: the measured diagnosis. Unset, advisory answers stay measured-only.
+    brave_search_api_key: str = ""
+    #: Two-letter country code biasing results, e.g. "NG" or "GB". Blank is global.
+    brave_search_country: str = ""
+
     # --- operational limits -------------------------------------------------
     #: Questions per user per minute against the AI query endpoint. Each one can
     #: call a paid provider, so this caps both spend and abuse.

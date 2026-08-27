@@ -614,6 +614,9 @@ export function AskAiPage({
     // asked for them, the actions it supports.
     const diagnosis = msg.query?.diagnosis ?? null
     const recommendations = msg.query?.recommendations ?? []
+    // Retrieved, not measured. Rendered in its own card so the two are never
+    // read as one list.
+    const practices = msg.query?.practices ?? []
 
     const metricValue = (() => {
       if (format !== 'metric' || rows.length === 0) return null
@@ -675,6 +678,44 @@ export function AskAiPage({
                       <p>{action.detail}</p>
                       {action.basis && <p className="ask-action-basis">{action.basis}</p>}
                     </div>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+
+          {practices.length > 0 && (
+            <section className="ask-card ask-practices">
+              <header className="ask-card-head">
+                <h4>What usually works</h4>
+                <span className="ask-card-meta">
+                  From outside sources, not from your data
+                </span>
+              </header>
+              <p className="ask-practices-note">
+                These are general practices for the pattern above, retrieved from the
+                web. They carry no figures about your business — every number in this
+                answer comes from your own data.
+              </p>
+              <ol className="ask-practice-list">
+                {practices.map((practice, index) => (
+                  <li key={`${practice.source_url}-${index}`} className="ask-practice">
+                    <h5>{practice.title}</h5>
+                    <p>{practice.detail}</p>
+                    <a
+                      className="ask-practice-source"
+                      href={practice.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer nofollow"
+                    >
+                      <span className="material-symbols-outlined" aria-hidden="true">
+                        open_in_new
+                      </span>
+                      <span>{practice.source_title || practice.source_domain}</span>
+                      {practice.source_domain && (
+                        <span className="ask-practice-domain">{practice.source_domain}</span>
+                      )}
+                    </a>
                   </li>
                 ))}
               </ol>

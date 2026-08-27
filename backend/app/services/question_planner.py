@@ -43,6 +43,11 @@ Return ONLY valid JSON with these keys:
 
 Rules:
 - resolved_question must stand alone (expand follow-ups; flip highest↔lowest when asked).
+- When RECENT CONVERSATION is present, resolve every pronoun and ellipsis against
+  it: carry forward the measure, the period and the segment the user is still
+  talking about. "Why?" after "which store led in February" is about that store
+  in February. Never copy figures from it — it records what was asked and
+  answered before, not what is true now.
 - Prefer null over guessing columns that are not implied by the question.
 - Do not invent years; leave time_window as the user stated it (e.g. "June").
 - No markdown, no commentary — JSON only.
@@ -235,6 +240,7 @@ async def plan_analysis(
     *,
     schema_text: str,
     previous_question: str | None = None,
+    context_block: str | None = None,
     api_key: str | None = None,
     model: str | None = None,
     base_url: str | None = None,
@@ -245,7 +251,13 @@ async def plan_analysis(
     if not api_key:
         return offline
 
-    user_parts = [schema_text, "", f"Question: {question.strip()}"]
+    user_parts = [schema_text]
+    # The transcript resolves what "it", "that one" and "the same but..." refer
+    # to. Without it a follow-up is planned from its own words, which carry no
+    # measure, no period and no segment.
+    if context_block and context_block.strip():
+        user_parts.extend(["", context_block.strip()])
+    user_parts.extend(["", f"Question: {question.strip()}"])
     if previous_question and previous_question.strip():
         user_parts.extend(
             [

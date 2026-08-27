@@ -155,6 +155,11 @@ class DriverContribution(BaseModel):
     #: Percent of the total movement across all segments, always positive.
     share: float
     direction: str
+    #: For a rate, the segment's own rate either side of the move. `current` and
+    #: `previous` above are its *contribution* to the blended figure, which is
+    #: what makes the parts sum to the whole.
+    own_now: float | None = None
+    own_before: float | None = None
 
 
 class Recommendation(BaseModel):
@@ -167,11 +172,32 @@ class Recommendation(BaseModel):
     kind: str = "model"
 
 
+class Practice(BaseModel):
+    """Outside guidance retrieved from the web, tied to the source it came from.
+
+    Structurally separate from `Recommendation`, which is measured from the
+    customer's rows. A practice never carries a figure about the business, and
+    never appears without a link a reader can check.
+    """
+
+    title: str
+    detail: str
+    source_url: str
+    source_title: str = ""
+    source_domain: str = ""
+
+
 class Diagnosis(BaseModel):
     """Why a measure moved: the comparison, the drivers, the supporting factors."""
 
     measure: str
     measure_label: str
+    #: "sum" for a column that is totalled, "ratio" for one computed per period.
+    measure_kind: str = "sum"
+    #: "%" when the measure is a rate, so the UI writes points rather than money.
+    unit: str = ""
+    #: False when the question named a subject this data does not measure.
+    measure_matched: bool = True
     direction: str
     current: float
     previous: float
@@ -183,6 +209,7 @@ class Diagnosis(BaseModel):
     dimension: str | None = None
     concentration: float | None = None
     drivers: list[DriverContribution] = []
+
     factors: list[dict[str, Any]] = []
     series: list[dict[str, Any]] = []
     rows_analyzed: int = 0
@@ -211,6 +238,11 @@ class QueryResponse(BaseModel):
     diagnosis: Diagnosis | None = None
     #: Actions derived from that evidence. Empty for ordinary questions.
     recommendations: list[Recommendation] = []
+    #: Retrieved outside guidance, each cited to a source. Empty unless web
+    #: research is configured and the question asked for advice.
+    practices: list[Practice] = []
+    #: What was searched for, so a reader can judge the practices above.
+    research_query: str | None = None
 
 
 class QueryRunResponse(QueryResponse):
@@ -304,6 +336,11 @@ class AppSettingsPublic(BaseModel):
     providers: list[str] = []
     currency: str = "NGN"
     currencies: list[CurrencyOption] = []
+    #: Whether the practice lane is wired up. The key itself is never returned.
+    brave_search_key_set: bool = False
+    brave_search_key_masked: str | None = None
+    brave_search_country: str = ""
+    web_research_enabled: bool = False
 
 
 class AppSettingsUpdate(BaseModel):
@@ -317,6 +354,11 @@ class AppSettingsUpdate(BaseModel):
     platform_tagline: str | None = Field(None, max_length=120)
     color_scheme: str | None = None
     currency: str | None = Field(None, min_length=3, max_length=3)
+    #: Brave Search token for the practice lane on advisory answers. Sending the
+    #: masked value back is a no-op, as with the LLM key.
+    brave_search_api_key: str | None = None
+    brave_search_country: str | None = Field(None, max_length=2)
+    web_research_enabled: bool | None = None
 
 
 class ConnectionTestRequest(BaseModel):

@@ -12,6 +12,8 @@ import pytest
 from app.models import DataSource
 from app.services.analytics import Dataset
 from app.services.diagnostics import (
+    UNMEASURED_PREFIX,
+    build_evidence_prompt,
     build_partial_context,
     build_partial_prompt,
     build_recommendations,
@@ -520,18 +522,115 @@ def test_partial_prompt_spells_out_the_limitations():
 # --- profit and margin questions --------------------------------------------
 
 
-def test_margin_question_measures_profit_not_revenue():
-    """The brief's data carries revenue and cost, never a profit column.
+def test_margin_question_measures_a_margin_not_a_column():
+    """A margin is profit over revenue, and neither column is that ratio.
 
-    Resolving "why did margin fall" to revenue answered that revenue *rose* —
-    the opposite of the question.
+    Resolving "why did margin fall" to revenue answered that revenue *rose*.
+    Resolving it to profit is wrong the same way for the opposite reason —
+    see the test below, where profit rises in the period the margin falls.
     """
     result = diagnose(dataset(sales_rows()), "why did profit margin fall?")
-    assert result["measure_label"] == "profit"
-    # April: 700 revenue against 800 cost.
-    assert result["current"] == -100.0
-    assert result["previous"] == 600.0
+    assert result["measure_label"] == "margin"
+    assert result["measure_kind"] == "ratio"
+    assert result["unit"] == "%"
+    # March: 1,500 revenue, 900 cost -> 40%. April: 700 revenue, 800 cost.
+    assert result["previous"] == pytest.approx(40.0)
+    assert result["current"] == pytest.approx(-14.29, abs=0.01)
     assert result["direction"] == "down"
+    # A percent change *of* a percentage is not a figure anyone can act on.
+    assert result["change_pct"] is None
+
+
+def margin_squeeze_rows() -> list[dict]:
+    """Two months where profit RISES while margin FALLS: 18.75% -> 15.0%.
+
+    This is the case that makes "margin" and "profit" different questions.
+    """
+    rows = []
+    for day, store, revenue, cost in (
+        ("2026-01-05", "Ikeja", 4000.0, 3200.0),
+        ("2026-01-12", "Lekki", 4000.0, 3300.0),
+        ("2026-01-20", "Abuja", 8000.0, 6500.0),
+        ("2026-03-05", "Ikeja", 6000.0, 5200.0),
+        ("2026-03-12", "Lekki", 6000.0, 5100.0),
+        ("2026-03-20", "Abuja", 12000.0, 10100.0),
+    ):
+        rows.append(
+            {
+                "order_date": day,
+                "region": store,
+                "revenue": revenue,
+                "cost": cost,
+                "units": int(revenue / 100),
+            }
+        )
+    return rows
+
+
+def test_margin_and_profit_are_answered_as_different_questions():
+    data = margin_squeeze_rows()
+
+    margin = diagnose(dataset(data), "what should we do about the margin?")
+    assert margin["measure_label"] == "margin"
+    assert margin["previous"] == pytest.approx(18.75)
+    assert margin["current"] == pytest.approx(15.0)
+    assert margin["direction"] == "down"
+
+    profit = diagnose(dataset(data), "why did profit change?")
+    assert profit["measure_label"] == "profit"
+    assert profit["previous"] == pytest.approx(3000.0)
+    assert profit["current"] == pytest.approx(3600.0)
+    assert profit["direction"] == "up"
+
+
+def test_margin_drivers_are_contribution_points_that_sum_to_the_move():
+    result = diagnose(dataset(sales_rows()), "why did margin fall?")
+    drivers = result["drivers"]
+    assert drivers
+    # Contributions are exact, not estimates: they add up to the whole move.
+    assert sum(d["change"] for d in drivers) == pytest.approx(result["change"], abs=0.05)
+    # current - previous == change, so the evidence prompt reads consistently.
+    for driver in drivers:
+        assert driver["current"] - driver["previous"] == pytest.approx(
+            driver["change"], abs=0.02
+        )
+    north = next(d for d in drivers if d["label"] == "North")
+    assert north["change"] == pytest.approx(-69.52, abs=0.05)
+    # The segment's own rate is carried too — that is what a reader acts on.
+    assert north["own_before"] == pytest.approx(40.0)
+    assert north["own_now"] == pytest.approx(-150.0)
+
+
+def test_margin_is_written_in_points_never_in_currency():
+    result = diagnose(dataset(sales_rows()), "why did margin fall?")
+    text = render_diagnosis(result, source_name="Sales")
+    assert "40.0%" in text
+    assert "points" in text
+    # The margin move is -54.3 points; -54 on its own would read as money.
+    assert "-54.3 points" in text
+
+
+def test_margin_recommendations_name_the_side_that_outgrew_the_other():
+    result = diagnose(dataset(margin_squeeze_rows()), "what should we do about the margin?")
+    mechanics = next(f for f in result["factors"] if f["kind"] == "margin_mechanics")
+    assert mechanics["cost_outgrew_revenue"] is True
+    actions = build_recommendations(result)
+    assert any(a["kind"] == "margin" for a in actions)
+
+
+def test_margin_result_payload_is_named_as_a_rate():
+    """The chart and the table decide by column name whether to total a column."""
+    payload = diagnosis_result_payload(diagnose(dataset(sales_rows()), "why did margin fall?"))
+    assert payload["columns"] == ["period", "margin_pct"]
+
+
+def test_a_margin_question_without_cost_does_not_answer_about_revenue():
+    rows = [
+        {"order_date": row["order_date"], "region": row["region"], "revenue": row["revenue"]}
+        for row in sales_rows()
+    ]
+    mapping = {"order_date": "Date", "region": "Region", "revenue": "Revenue"}
+    assert diagnose(dataset(rows, mapping), "why did margin fall?") is None
 
 
 def test_derived_profit_does_not_override_a_real_profit_column():
@@ -550,3 +649,95 @@ def test_margin_factor_reads_revenue_even_when_asked_about_profit():
     assert factor["margin_before"] == pytest.approx(40.0)
     assert factor["squeezed"] is True
     assert factor["cost_direction"] == "down"
+
+
+# --- period granularity -----------------------------------------------------
+
+
+def _span_rows(start: str, days: int, step: int = 1) -> list[dict]:
+    from datetime import date, timedelta
+
+    begin = date.fromisoformat(start)
+    return [
+        {
+            "order_date": (begin + timedelta(days=offset)).isoformat(),
+            "region": "North" if offset % 2 else "South",
+            "revenue": 100.0 + offset,
+            "cost": 60.0,
+            "units": 10,
+        }
+        for offset in range(0, days, step)
+    ]
+
+
+def test_a_short_span_compares_weeks_not_two_trading_days():
+    """A 40-day upload used to compare the last two *days* that had rows in them.
+
+    That reads as a collapse whenever the final day happens to be quiet, and
+    the advice then says the measure "moved in one day".
+    """
+    result = diagnose(dataset(_span_rows("2026-02-01", 40)), "why did revenue fall?")
+    assert result["granularity"] == "week"
+    assert "week of" in result["period_label"]
+
+
+def test_a_span_inside_one_month_still_finds_two_periods():
+    """Three weeks inside one calendar month is a single monthly bucket."""
+    result = diagnose(dataset(_span_rows("2026-02-02", 20)), "why did revenue fall?")
+    assert result["granularity"] == "week"
+    assert len(result["series"]) >= 2
+
+
+def test_a_span_of_days_still_compares_days():
+    result = diagnose(dataset(_span_rows("2026-02-02", 6)), "why did revenue fall?")
+    assert result["granularity"] == "day"
+
+
+def test_a_long_span_still_compares_months():
+    """The existing behaviour at the top end is unchanged."""
+    result = diagnose(dataset(sales_rows()), "why did revenue fall")
+    assert result["granularity"] == "month"
+
+
+# --- answering only what the data can answer --------------------------------
+
+
+def test_a_question_with_no_subject_is_answered_on_the_headline_figure():
+    """"What should we do" names nothing, so the headline figure answers it."""
+    result = diagnose(dataset(sales_rows()), "what should we do")
+    assert result["measure_matched"] is True
+    assert UNMEASURED_PREFIX not in render_diagnosis(result)
+
+
+def test_a_subject_the_data_does_not_measure_is_declared_not_answered():
+    """Revenue advice under a churn question is advice about a different thing."""
+    result = diagnose(dataset(sales_rows()), "how can we reduce customer churn")
+    assert result["measure_matched"] is False
+    assert render_diagnosis(result).startswith(UNMEASURED_PREFIX)
+    actions = build_recommendations(result)
+    assert actions[0]["kind"] == "coverage_gap"
+
+
+def test_a_hypothetical_is_not_answered_from_history():
+    """Rows record what happened; opening a new store has not happened."""
+    result = diagnose(dataset(sales_rows()), "should we open a new store in Kano?")
+    assert result["measure_matched"] is False
+    assert render_diagnosis(result).startswith(UNMEASURED_PREFIX)
+
+
+def test_a_forecast_is_not_answered_from_history():
+    result = diagnose(dataset(sales_rows()), "what will revenue be next quarter?")
+    assert result["measure_matched"] is False
+
+
+def test_a_measured_subject_carries_no_disclaimer():
+    for question in ("how do we improve sales", "what should we do about the margin?"):
+        result = diagnose(dataset(sales_rows()), question)
+        assert result["measure_matched"] is True, question
+        assert UNMEASURED_PREFIX not in render_diagnosis(result), question
+
+
+def test_the_evidence_prompt_tells_the_model_not_to_answer_the_wrong_question():
+    result = diagnose(dataset(sales_rows()), "how can we reduce customer churn")
+    prompt = build_evidence_prompt("how can we reduce customer churn", result)
+    assert "nothing in the question named this measure" in prompt

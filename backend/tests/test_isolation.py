@@ -289,6 +289,10 @@ async def test_a_member_never_sees_provider_configuration(client, db):
     assert view["api_key_masked"] is None
     assert view["llm_providers"] == []
     assert view["openai_model"] == ""
+    # What the workspace is wired to is configuration, search included.
+    assert view["brave_search_key_set"] is False
+    assert view["brave_search_key_masked"] is None
+    assert view["web_research_enabled"] is False
     # Branding is still there, or the app cannot render itself.
     assert view["platform_name"]
     assert view["currency"]

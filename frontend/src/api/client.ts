@@ -95,6 +95,13 @@ export interface DriverContribution {
   /** Percent of the total movement across all segments, always positive. */
   share: number
   direction: 'up' | 'down'
+  /**
+   * For a rate, the segment's own rate either side of the move. `current` and
+   * `previous` are its *contribution* to the blended figure, which is what
+   * makes the parts sum to the whole.
+   */
+  own_now?: number | null
+  own_before?: number | null
 }
 
 /** An action the evidence supports, with the figure that justifies it. */
@@ -106,10 +113,30 @@ export interface Recommendation {
   kind: string
 }
 
+/**
+ * Outside guidance retrieved from the web, tied to the source it came from.
+ *
+ * Deliberately a separate type from `Recommendation`: that one is measured from
+ * the customer's own rows, this one is not, and the UI must never blur them.
+ */
+export interface Practice {
+  title: string
+  detail: string
+  source_url: string
+  source_title: string
+  source_domain: string
+}
+
 /** Why a measure moved: the comparison, the drivers, the supporting factors. */
 export interface Diagnosis {
   measure: string
   measure_label: string
+  /** "ratio" for a measure computed per period, such as a margin. */
+  measure_kind?: 'sum' | 'ratio'
+  /** "%" when the measure is a rate, so the UI writes points, not currency. */
+  unit?: string
+  /** False when the question named a subject this data does not measure. */
+  measure_matched?: boolean
   direction: 'up' | 'down' | 'flat'
   current: number
   previous: number
@@ -146,6 +173,10 @@ export interface QueryRecord {
   diagnosis?: Diagnosis | null
   /** Actions derived from that evidence. Empty for ordinary questions. */
   recommendations?: Recommendation[]
+  /** Retrieved outside guidance, each cited to a source it came from. */
+  practices?: Practice[]
+  /** What was searched for, so a reader can judge the practices above. */
+  research_query?: string | null
 }
 
 export interface ChartRecommendation {
@@ -329,6 +360,11 @@ export interface AppSettings {
   providers: string[]
   currency: string
   currencies: CurrencyOption[]
+  /** Whether the practice lane is wired up. The key itself is never returned. */
+  brave_search_key_set: boolean
+  brave_search_key_masked: string | null
+  brave_search_country: string
+  web_research_enabled: boolean
 }
 
 export interface CurrencyOption {
@@ -348,6 +384,9 @@ export interface AppSettingsUpdate {
   platform_tagline?: string
   color_scheme?: string
   currency?: string
+  brave_search_api_key?: string
+  brave_search_country?: string
+  web_research_enabled?: boolean
 }
 
 export interface ConnectionTestPayload {

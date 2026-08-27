@@ -1009,6 +1009,89 @@
   font-size: 12px !important;
 }
 
+/* --- the practice lane ----------------------------------------------------
+ *
+ * Retrieved from outside sources, not measured from the customer's rows. It is
+ * given a different surface, a dashed rule and an explicit note for exactly one
+ * reason: a reader must never mistake it for a figure about their business.
+ */
+.ask-practices {
+  display: grid;
+  gap: var(--cl-space-md);
+  padding: 0 16px 18px;
+}
+
+.ask-practices > .ask-card-head {
+  margin: 0 -16px;
+}
+
+.ask-practices-note {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px dashed var(--cl-border-strong, var(--cl-border));
+  border-radius: 0 var(--cl-radius-sm, 6px) var(--cl-radius-sm, 6px) 0;
+  background: var(--cl-surface-container-low);
+  color: var(--cl-on-surface-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ask-practice-list {
+  display: grid;
+  gap: var(--cl-space-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ask-practice {
+  padding: var(--cl-space-md);
+  border: 1px dashed var(--cl-border);
+  border-radius: var(--cl-radius-md);
+  background: var(--cl-surface-container-lowest);
+}
+
+.ask-practice h5 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--cl-on-surface);
+}
+
+.ask-practice p {
+  margin: 0;
+  color: var(--cl-on-surface-variant);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* The link is the point: a practice without a checkable source is not shown. */
+.ask-practice-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--cl-accent-strong);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.ask-practice-source:hover {
+  text-decoration: underline;
+}
+
+.ask-practice-source .material-symbols-outlined {
+  font-size: 14px;
+}
+
+.ask-practice-domain {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--cl-surface-container-high);
+  color: var(--cl-on-surface-muted);
+  font-size: 11px;
+}
+
 .ask-followups {
   display: flex;
   flex-wrap: wrap;
