@@ -41,7 +41,7 @@ AI-Business-Intelligence/
 | Field | Value |
 |-------|-------|
 | **Last updated** | 2026-08-27 |
-| **Last agent/session** | Margin accuracy, period granularity, advisory honesty guard, multi-turn context, Brave-backed practice lane |
+| **Last agent/session** | Margin accuracy, period granularity, advisory honesty guard, multi-turn context, Brave-backed practice lane, answer-latency fixes |
 | **Active phase** | Phase 6 — mostly complete (see §3 Phase 6 table) |
 | **Phase status** | Phases 1–5 validated against the code; deploy artifacts in place |
 | **Blockers** | None for a soft launch. Open gaps listed in `docs/DEPLOYMENT.md` §6 |
@@ -405,6 +405,31 @@ AI-Business-Intelligence/
       third-party data, never instructions. Off unless `BRAVE_SEARCH_API_KEY` is
       set (or an admin adds it under Settings → Web research), and every failure
       path returns nothing, so a search outage can never sink a measured answer
+
+- [x] **Answer latency, measured rather than guessed.** Adding conversation
+      context and the practice lane slowed answers. Benchmarked first: the CPU
+      work was innocent — `build_comparison_index` is *faster* than the
+      `build_time_index` it replaced for diagnosis (190ms vs 210ms on 20k rows,
+      because monthly buckets beat daily ones), `build_recommendations` is under
+      0.1ms, and the four `load_app_settings` calls per request cost 0.04ms total
+      because SQLAlchemy's identity map already dedupes them. The cost was all
+      network and prompt size, and three things fixed it:
+      - **The web search ran in series ahead of a second model call.** It depends
+        only on the diagnosis, which is already computed, so it now runs
+        concurrently with the model call that writes the answer
+        (`asyncio.gather`). The whole search round trip leaves the critical path.
+        Covered by a timed HTTP test in `tests/test_query_latency.py`
+      - **The transcript went to both the planner and the SQL writer.** The
+        planner's one job is producing a standalone `resolved_question`, and the
+        SQL prompt already receives that — so the raw history was paying for the
+        same resolution twice on every question in a chat. It now goes to the
+        planner only, matching what the workspace path already did
+      - **Detail is tiered by recency.** A pronoun refers to the turn before it,
+        so that turn keeps its full shape (answer, columns, entities, SQL) and
+        older turns keep only enough to place the subject. ~460 tokens on two
+        calls became ~310 on one
+      - Brave's timeout dropped 12s → 6s: a best-effort lane running alongside
+        the real answer should drop out rather than hold the reply back
 
 > **Existing sources need a one-off recompute** to gain profiles — open Data
 > Sources and press **Recompute** (new uploads profile automatically).

@@ -40,7 +40,12 @@ BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 
 #: Brave's free tier is one request per second. An advisory answer makes one
 #: call, so this is a ceiling rather than a budget.
-_TIMEOUT_SECONDS = 12.0
+#:
+#: Kept tight on purpose. This lane is best-effort garnish on an answer that is
+#: already correct without it, and it runs concurrently with the model call that
+#: writes that answer — so a slow search should drop out rather than hold the
+#: reply back waiting for it.
+_TIMEOUT_SECONDS = 6.0
 _MAX_RESULTS = 6
 _MAX_SNIPPET_CHARS = 400
 

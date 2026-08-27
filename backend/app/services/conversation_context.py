@@ -160,11 +160,18 @@ def _truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
-def build_context_block(turns: list[Turn], *, max_answer_chars: int = 320) -> str:
+def build_context_block(turns: list[Turn], *, max_answer_chars: int = 300) -> str:
     """The recent turns as prompt text, or "" when there are none.
 
-    Deliberately compact and explicitly labelled as history: the model needs it
-    to resolve what "it" refers to, and must not answer *from* it.
+    Detail is tiered by recency, because every character here is paid for twice:
+    the block goes into the planner call *and* the SQL call, on every question
+    in a chat that has history, and prompt size is time-to-first-token. A
+    pronoun almost always refers to the turn immediately before, so that one
+    carries its full shape — answer, columns, entities, SQL — and older turns
+    carry only enough to place the thread's subject.
+
+    Explicitly labelled as history: the model needs it to resolve what "it"
+    refers to, and must not answer *from* it.
     """
     if not turns:
         return ""
@@ -174,17 +181,25 @@ def build_context_block(turns: list[Turn], *, max_answer_chars: int = 320) -> st
         "current question must be answered from a fresh query, never from the "
         "figures below):"
     ]
+    last = len(turns)
     for index, turn in enumerate(turns, start=1):
-        lines.append(f"[{index}] Asked: {_truncate(turn.question, 200)}")
+        latest = index == last
+        lines.append(f"[{index}] Asked: {_truncate(turn.question, 200 if latest else 110)}")
         if turn.answer:
-            lines.append(f"    Answered: {_truncate(turn.answer, max_answer_chars)}")
+            lines.append(
+                f"    Answered: "
+                f"{_truncate(turn.answer, max_answer_chars if latest else 110)}"
+            )
+        if not latest:
+            continue
+        # The shape of the last result is what resolves "the same but…".
         if turn.columns:
             lines.append(f"    Result columns: {', '.join(turn.columns[:8])}")
         entities = turn.entities
         if entities:
             lines.append(f"    Named in the result: {', '.join(entities[:6])}")
         if turn.sql:
-            lines.append(f"    SQL: {_truncate(turn.sql, 240)}")
+            lines.append(f"    SQL: {_truncate(turn.sql, 220)}")
     return "\n".join(lines)
 
 

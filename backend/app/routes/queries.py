@@ -1,3 +1,4 @@
+import asyncio
 import csv
 import io
 import json
@@ -70,7 +71,7 @@ from app.services.response_planner import (
     plan_response,
 )
 from app.services.schema_context import pick_source_for_question, schema_as_json
-from app.services.web_research import build_research_query
+from app.services.web_research import SearchResult, build_research_query
 from app.services.web_research import search as web_search
 
 router = APIRouter(prefix="/queries", tags=["queries"])
@@ -367,7 +368,18 @@ async def run_query(
             advisory = intent == "advisory"
             candidates = build_recommendations(diagnosis) if advisory else []
 
-            answer, recommendations = await generate_diagnostic_answer(
+            # What to search for depends only on the diagnosis, which is
+            # already computed — so the search runs *alongside* the model call
+            # that writes the answer rather than after it. Serialising them put
+            # the whole search latency on the critical path for nothing.
+            research = await get_research_runtime(db) if advisory else None
+            research_query = (
+                build_research_query(payload.natural_language, diagnosis)
+                if research
+                else None
+            )
+
+            write_answer = generate_diagnostic_answer(
                 payload.natural_language,
                 diagnosis,
                 advisory=advisory,
@@ -379,6 +391,20 @@ async def run_query(
                 currency=await get_currency(db),
                 context_block=context_block,
             )
+
+            results: list[SearchResult] = []
+            if research and research_query:
+                (answer, recommendations), results = await asyncio.gather(
+                    write_answer,
+                    web_search(
+                        research_query,
+                        api_key=research["api_key"],
+                        country=research["country"] or None,
+                    ),
+                )
+            else:
+                answer, recommendations = await write_answer
+
             mode = "diagnostic+model" if answer else "diagnostic"
             # The measured actions stand on their own; the model only rewords them.
             if not recommendations:
@@ -390,32 +416,20 @@ async def run_query(
                     else render_diagnosis(diagnosis, source_name=source.name)
                 )
 
-            # The practice lane. It runs only for a question that asked for
-            # advice, only after the measured answer is written, and only when a
-            # search key is configured. Nothing it returns can change a figure:
-            # the model on this path never sees a row, and every practice it
-            # keeps must cite a URL the search actually returned.
+            # The practice lane, reading results the search already fetched.
+            # Nothing it returns can change a figure: the model on this path
+            # never sees a row, and every practice it keeps must cite a URL the
+            # search actually returned.
             practices: list[dict[str, str]] = []
-            research_query: str | None = None
-            if advisory:
-                research = await get_research_runtime(db)
-                if research:
-                    research_query = build_research_query(
-                        payload.natural_language, diagnosis
-                    )
-                    results = await web_search(
-                        research_query,
-                        api_key=research["api_key"],
-                        country=research["country"] or None,
-                    )
-                    practices = await generate_practices(
-                        payload.natural_language,
-                        render_diagnosis(diagnosis, source_name=source.name),
-                        results,
-                        api_key=runtime["api_key"],
-                        model=runtime["model"],
-                        base_url=runtime["base_url"],
-                    )
+            if results:
+                practices = await generate_practices(
+                    payload.natural_language,
+                    render_diagnosis(diagnosis, source_name=source.name),
+                    results,
+                    api_key=runtime["api_key"],
+                    model=runtime["model"],
+                    base_url=runtime["base_url"],
+                )
 
             result = diagnosis_result_payload(diagnosis)
             query.generated_sql = None
@@ -477,7 +491,15 @@ async def run_query(
             return query_to_response(query, mode=mode, explanation=explanation)
 
         async def plan_and_write_sql(active: dict[str, str]):
-            """Everything that needs a model. Retried against the next provider."""
+            """Everything that needs a model. Retried against the next provider.
+
+            The transcript goes to the planner only. Its whole job is turning a
+            follow-up into a standalone `resolved_question`, and that rewrite is
+            what the SQL prompt then receives — so sending the raw history to
+            both calls pays for the same resolution twice, on every question in
+            a chat that has any. (The workspace path already worked this way;
+            the pinned one now matches it.)
+            """
             plan_for_question = await build_question_plan(
                 pinned,
                 sources,
@@ -496,7 +518,6 @@ async def run_query(
                     model=active["model"],
                     base_url=active["base_url"],
                     previous_question=previous,
-                    context_block=context_block,
                     analysis_plan=plan_for_question,
                 )
                 return pinned, written, written_mode, plan_for_question
