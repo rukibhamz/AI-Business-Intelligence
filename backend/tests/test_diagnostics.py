@@ -741,3 +741,95 @@ def test_the_evidence_prompt_tells_the_model_not_to_answer_the_wrong_question():
     result = diagnose(dataset(sales_rows()), "how can we reduce customer churn")
     prompt = build_evidence_prompt("how can we reduce customer churn", result)
     assert "nothing in the question named this measure" in prompt
+
+
+# --- a question the data is not broken down by ------------------------------
+
+
+def entity_rows():
+    """Two regions and two products, so a question can name either."""
+    rows = []
+    for month in ("01", "02", "03"):
+        for region, product, revenue, cost in (
+            ("North", "Laptop 14", 1000.0, 600.0),
+            ("South", "Blender", 500.0, 300.0),
+        ):
+            rows.append(
+                {
+                    "order_date": f"2026-{month}-10",
+                    "region": region,
+                    "product": product,
+                    "revenue": revenue,
+                    "cost": cost,
+                    "units": int(revenue / 10),
+                }
+            )
+    return rows
+
+
+ENTITY_MAPPING = {
+    "order_date": "Date",
+    "region": "Region",
+    "product": "Product",
+    "revenue": "Revenue",
+    "cost": "Cost",
+    "units": "Quantity",
+}
+
+
+def test_a_question_naming_a_value_the_comparison_ignores_is_flagged():
+    result = diagnose(
+        dataset(entity_rows(), ENTITY_MAPPING), "how do i improve Laptop 14 sales in North?"
+    )
+    named = {e["label"] for e in result["question_entities"]}
+    assert {"Laptop 14", "North"} <= named
+    # Whichever dimension the movement concentrated in, the other is unaddressed.
+    assert result["unaddressed_entities"]
+    assert result["addresses_question"] is False
+
+
+def test_a_question_naming_a_segment_the_comparison_did_attribute_to_is_fine():
+    result = diagnose(dataset(sales_rows()), "why did revenue fall in North?")
+    assert {e["label"] for e in result["question_entities"]} == {"North"}
+    assert result["unaddressed_entities"] == []
+    assert result["addresses_question"] is True
+
+
+def test_an_unanswerable_question_leads_with_the_action_not_the_refusal():
+    """Spending the answer on what cannot be measured is not an answer."""
+    result = diagnose(
+        dataset(entity_rows(), ENTITY_MAPPING), "how do i improve Laptop 14 sales in North?"
+    )
+    actions = build_recommendations(result)
+    answer = render_advice(result, actions)
+
+    assert answer.startswith("Start with"), answer
+    opening = answer.split(".")[0].lower()
+    for refusal in ("cannot answer", "not broken down", "does not carry", "is not analysed"):
+        assert refusal not in opening, f"answer opens on a refusal: {answer}"
+
+
+def test_the_first_action_says_what_to_do_and_keeps_the_caveat_in_its_basis():
+    result = diagnose(
+        dataset(entity_rows(), ENTITY_MAPPING), "how do i improve Laptop 14 sales in North?"
+    )
+    first = build_recommendations(result)[0]
+    assert first["kind"] == "scope_gap"
+    assert first["detail"].startswith(("Map", "Add"))
+    # The honesty lives in the basis line, where every action states its footing.
+    assert "whole dataset" in first["basis"]
+
+
+def test_the_model_is_told_to_open_with_the_action(monkeypatch):
+    result = diagnose(
+        dataset(entity_rows(), ENTITY_MAPPING), "how do i improve Laptop 14 sales in North?"
+    )
+    prompt = build_evidence_prompt("how do i improve Laptop 14 sales in North?", result)
+    assert "OPEN WITH THE FIRST ACTION" in prompt
+    assert "never state one" in prompt
+
+
+def test_a_question_with_no_named_values_is_unaffected():
+    result = diagnose(dataset(sales_rows()), "what should we do about the drop")
+    assert result["question_entities"] == []
+    assert result["addresses_question"] is True

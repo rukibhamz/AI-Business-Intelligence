@@ -1088,9 +1088,23 @@ def render_advice(
     Someone who asked what to do should be told, not handed a description and
     left to draw the conclusion.
     """
-    text = render_diagnosis(diagnosis, source_name=source_name)
     first = next((r for r in recommendations if r["priority"] == "now"), None)
     first = first or (recommendations[0] if recommendations else None)
+
+    # When the data is not broken down the way the question asked, spending the
+    # answer explaining that is not an answer — the actions are. Lead with the
+    # first one and let the scope note follow it, rather than opening on what
+    # cannot be done.
+    if not diagnosis.get("addresses_question", True):
+        if not first:
+            return render_diagnosis(diagnosis, source_name=source_name)
+        return (
+            f"Start with “{first['title']}”: {first['detail']} "
+            f"The rest come from what this data does measure — "
+            f"{diagnosis['measure_label']} across the whole dataset."
+        )
+
+    text = render_diagnosis(diagnosis, source_name=source_name)
     if first:
         text += f" Start with “{first['title']}”: {first['detail']}"
     return text
@@ -1152,11 +1166,13 @@ def build_recommendations(diagnosis: dict[str, Any]) -> list[dict[str, str]]:
         fields = ", ".join(sorted({e["field"].lower() for e in unaddressed}))
         out.append(
             _recommendation(
-                f"Break {measure} down by {fields} to answer this",
-                f"You asked about {named}, and the connected data is not analysed at "
-                f"that level — so nothing below is about {named} specifically. Map or "
-                f"add the {fields} column on this source, or ask for {measure} by "
-                f"{fields} directly, and the same analysis will run scoped to it.",
+                f"Break {measure} down by {fields}",
+                # Action first. The limitation belongs in the basis line, where
+                # every other action states what it rests on — an instruction
+                # that opens by explaining what cannot be done is not advice.
+                f"Map or add the {fields} column on this source, then ask again: "
+                f"the same comparison will run scoped to {named}. Asking for "
+                f"{measure} by {fields} directly works too.",
                 f"{measure.capitalize()} was compared across the whole dataset, "
                 f"not for {named}.",
                 "now",
@@ -1388,6 +1404,11 @@ Rules:
   sentence of "answer" must say the data cannot answer that question, and the
   recommendations must be about the figures you were given - never dressed up as
   advice on the subject that was asked about.
+- If instead the evidence says the question names something it is NOT broken down
+  by, do the opposite: lead with the action, not the limitation. Open "answer"
+  with what to do first. Someone who asked what to do is not helped by a
+  paragraph on what cannot be measured — one closing clause noting the figures
+  are dataset-wide is enough. Still never state a figure for the thing named.
 """
 
 
@@ -1432,8 +1453,11 @@ def build_evidence_prompt(
         lines.append(
             f"IMPORTANT: the question names {named}, and NOTHING BELOW is broken "
             "down that way — this comparison is across the whole dataset. You have "
-            "no figure for those, so do not state one. Say plainly that the data "
-            "as connected cannot answer the question at that level of detail."
+            f"no figure for {named}, so never state one. "
+            "Do NOT spend the answer explaining what cannot be answered: that is "
+            "not an answer, and the actions already lead with the data gap. OPEN "
+            "WITH THE FIRST ACTION. One short closing clause may note that the "
+            "figures are dataset-wide."
         )
     if unit == "%":
         lines.append(

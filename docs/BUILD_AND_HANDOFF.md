@@ -463,6 +463,15 @@ AI-Business-Intelligence/
       keeps its card. The evidence prompt states the gap explicitly too, since
       handing a model a region breakdown under a product question is what invited
       the fabrication above
+      - **The answer leads with the action, not the limitation.** The first pass
+        at this was honest and useless: "The data cannot answer how to improve
+        laptop sales in Ibadan because it is not broken down by product…" spends
+        the whole reply on what cannot be done. Someone who asked what to do is
+        not helped by that. The reply now opens with the first action ("Break
+        revenue down by product: map or add the product column, then ask again…")
+        and the scope note follows as a closing clause. The limitation still
+        appears in full — in the action's `basis` line, where every other action
+        already states what it rests on
 - [x] **Columns outside the vocabulary are now usable** (`services/field_inference.py`)
       — `CANONICAL_FIELDS` is a fixed list and analytics keys off it, so a
       logistics or clinic dataset had almost every column sitting at "Unmapped":
