@@ -60,3 +60,4 @@ Thumbs.db
 backend/tests/.uploads/
 .pytest_cache/
 .ruff_cache/
+docs/submission/Cognitive-Logic-Submission.pdf
