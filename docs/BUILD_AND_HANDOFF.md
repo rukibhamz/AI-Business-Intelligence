@@ -40,8 +40,8 @@ AI-Business-Intelligence/
 
 | Field | Value |
 |-------|-------|
-| **Last updated** | 2026-08-27 |
-| **Last agent/session** | Margin accuracy, period granularity, advisory honesty guard, multi-turn context, Brave-backed practice lane, answer-latency fixes |
+| **Last updated** | 2026-08-28 |
+| **Last agent/session** | Numeric grounding check, scope-gap detection, inferred field roles |
 | **Active phase** | Phase 6 — mostly complete (see §3 Phase 6 table) |
 | **Phase status** | Phases 1–5 validated against the code; deploy artifacts in place |
 | **Blockers** | None for a soft launch. Open gaps listed in `docs/DEPLOYMENT.md` §6 |
@@ -430,6 +430,61 @@ AI-Business-Intelligence/
         calls became ~310 on one
       - Brave's timeout dropped 12s → 6s: a best-effort lane running alongside
         the real answer should drop out rather than hold the reply back
+
+- [x] **Critical: the model fabricated a figure, and nothing checked.** Asked
+      "how do i improve laptop sales in ibadan?", it replied that "Laptop 14 sold
+      only 28 units in Ibadan". The evidence it was given carried no product
+      breakdown at all — the sole `28` in it was `+28%` from the cost line,
+      re-served as a unit count. Every prompt already said "use only figures from
+      the evidence"; that instruction is necessary and not sufficient.
+      `services/grounding.py` now enforces it the way `parse_practices` enforces
+      citations: the written answer is checked against the evidence it was built
+      from, and one unsupported figure discards the whole answer in favour of the
+      deterministic renderer. Applied to the narrative, diagnostic, advisory and
+      partial paths.
+      - Figures are compared **with their unit**. A bare value check passes
+        "28 units" against "+28%" — same number, entirely different claim
+      - Tolerance comes from the precision the answer was written to, so 21.6%
+        supports "22%" but 12% does not support "12.4%": stating a decimal claims
+        a precision the evidence never had
+      - No allowance for a percentage "derived" by dividing two evidence figures.
+        With a dozen numbers to divide almost any percentage is reachable, and the
+        allowance would license the arithmetic these prompts exist to prevent
+- [x] **An answer no longer presents evidence about a different question.** That
+      same reply shipped with a full "What moved" card breaking revenue down by
+      region — confident, correct, and about nothing that was asked.
+      `named_entities()` now finds the dimension *values* a question names
+      (Laptop 14, Ibadan), which the canonical mapping cannot see because they are
+      values rather than columns. When the comparison is not broken down by one of
+      them, `addresses_question` is false: the UI hides the evidence card, the
+      actions lead instead, and the first action names what would close the gap
+      ("Break revenue down by product to answer this"). A question naming a
+      segment the diagnosis *did* attribute to — "why did revenue fall in Lagos" —
+      keeps its card. The evidence prompt states the gap explicitly too, since
+      handing a model a region breakdown under a product question is what invited
+      the fabrication above
+- [x] **Columns outside the vocabulary are now usable** (`services/field_inference.py`)
+      — `CANONICAL_FIELDS` is a fixed list and analytics keys off it, so a
+      logistics or clinic dataset had almost every column sitting at "Unmapped":
+      invisible to charts, findings and attribution. Unmapped columns are now
+      classified by what their **values** look like, and join the dataset's
+      vocabulary under a name derived from the column (`shipping_zone` →
+      "Shipping Zone"):
+      - **dimension** — groupable, so charts and driver attribution can use it
+      - **measure** — summable
+      - **rate** — comparable but never summed, and never on a count's axis
+      - **unusable** — an order reference or free text, deliberately rejected;
+        grouping a chart by one draws a bar per record
+      `Dataset.dimensions()` / `.measures()` replace the hard-coded
+      `DIMENSION_FIELDS` at every call site, so the curated fields still come
+      first (Region before Shipping Zone) and the inferred ones extend rather than
+      replace them. The SQL prompt gains a COLUMN ROLES block stating what may be
+      grouped, summed, and never summed
+      - Two judgement calls worth knowing: `to_number` is deliberately forgiving
+        (it reads "₦1,200" and "(500)"), so it also reads "R0" as 0 — inference
+        needs a stricter numeric test or every order reference passes as a number.
+        And "whole and near-unique" describes an identifier *and* a freight charge;
+        what separates them is density, since identifiers are issued consecutively
 
 > **Existing sources need a one-off recompute** to gain profiles — open Data
 > Sources and press **Recompute** (new uploads profile automatically).

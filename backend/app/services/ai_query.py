@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+import logging
 import re
 import sqlite3
 from pathlib import Path
@@ -20,6 +21,7 @@ from app.services.diagnostics import (
     build_partial_prompt,
     parse_advisory_json,
 )
+from app.services.grounding import ungrounded_figures
 from app.services.question_planner import (
     AnalysisPlan,
     format_plan_for_sql,
@@ -49,6 +51,8 @@ from app.services.web_research import (
     build_practice_prompt,
     parse_practices,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Mode reported when the offline planner fell back to a plain row dump. The
 #: rows are real, but they do not answer the question, and the answer says so.
@@ -747,6 +751,27 @@ async def generate_narrative(
     return cleaned or None
 
 
+def _grounded_or_none(answer: str | None, evidence: str, *, path: str) -> str | None:
+    """Return the answer only if every figure in it is supported by the evidence.
+
+    The prompts forbid inventing a figure; this is what makes the rule hold. One
+    unsupported number discards the whole answer, and the caller falls back to
+    the deterministic write-up — which states the same findings from the same
+    numbers, so nothing is lost but fluency.
+    """
+    if not answer:
+        return None
+    unsupported = ungrounded_figures(answer, evidence)
+    if unsupported:
+        logger.warning(
+            "Discarded a %s answer citing figures absent from its evidence: %s",
+            path,
+            ", ".join(unsupported[:5]),
+        )
+        return None
+    return answer
+
+
 async def generate_diagnostic_answer(
     question: str,
     diagnosis: dict[str, Any],
@@ -809,10 +834,14 @@ async def generate_diagnostic_answer(
 
     if advisory:
         answer, recommendations = parse_advisory_json(content)
-        return answer, recommendations
+        # The recommendations are kept or dropped with the answer they came
+        # with: a model that invented a figure in its prose has not earned
+        # trust in the bases it wrote beneath it.
+        checked = _grounded_or_none(answer, prompt, path="advisory")
+        return (checked, recommendations if checked else [])
 
     cleaned = sanitize_narrative(content)
-    return (cleaned or None), []
+    return _grounded_or_none(cleaned or None, prompt, path="diagnostic"), []
 
 
 async def generate_partial_answer(
@@ -835,18 +864,16 @@ async def generate_partial_answer(
     if not key:
         return None
 
+    prompt = build_partial_prompt(
+        question, context, source_name=source_name, currency=currency
+    )
     payload = {
         "model": model or settings.openai_model,
         "temperature": 0.2,
         "max_tokens": 320,
         "messages": [
             {"role": "system", "content": PARTIAL_SYSTEM},
-            {
-                "role": "user",
-                "content": build_partial_prompt(
-                    question, context, source_name=source_name, currency=currency
-                ),
-            },
+            {"role": "user", "content": prompt},
         ],
     }
     url = base_url or settings.openai_base_url
@@ -866,7 +893,7 @@ async def generate_partial_answer(
     except Exception:
         return None
 
-    return sanitize_narrative(content) or None
+    return _grounded_or_none(sanitize_narrative(content) or None, prompt, path="partial")
 
 
 async def generate_practices(

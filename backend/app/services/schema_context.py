@@ -48,7 +48,29 @@ def build_schema_prompt(source: DataSource) -> str:
     )
     if rules:
         lines.append("\n" + rules)
+
+    # What each column may be used for. Without this a model sums a score, or
+    # groups by an order reference — and on a dataset outside the curated
+    # vocabulary those role hints are the only signal it has.
+    from app.services.field_inference import describe_field_roles
+
+    names = [c["name"] for c in chosen["columns"]]
+    roles = describe_field_roles(
+        names,
+        {c["name"]: c.get("profile") for c in chosen["columns"]},
+        canonical_columns_inverse(source, names),
+    )
+    if roles:
+        lines.append("\n" + roles)
     return "\n".join(lines)
+
+
+def canonical_columns_inverse(source: DataSource, columns: list[str]) -> dict[str, str]:
+    """column -> canonical field, the inverse of `canonical_columns`."""
+    return {
+        column: canonical
+        for canonical, column in canonical_columns(source, columns).items()
+    }
 
 
 def build_measurement_rules(

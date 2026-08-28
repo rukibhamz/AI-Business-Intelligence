@@ -659,14 +659,23 @@ export function AskAiPage({
 
           <p className="ask-answer">{msg.text}</p>
 
-          {diagnosis && renderDiagnosis(diagnosis)}
+          {/*
+            The evidence card is the measured breakdown behind the answer. When
+            the comparison is about something other than what was asked — the
+            question named a product this data is not broken down by — showing
+            it reads as an answer to the question, which it is not. The actions
+            lead instead, and the first of them says what would close the gap.
+          */}
+          {diagnosis && diagnosis.addresses_question !== false && renderDiagnosis(diagnosis)}
 
           {recommendations.length > 0 && (
             <section className="ask-card ask-actions">
               <header className="ask-card-head">
                 <h4>Recommended actions</h4>
                 <span className="ask-card-meta">
-                  {recommendations.length} suggested from the evidence above
+                  {diagnosis && diagnosis.addresses_question === false
+                    ? 'What would let this question be answered'
+                    : `${recommendations.length} suggested from the evidence above`}
                 </span>
               </header>
               <ol className="ask-action-list">

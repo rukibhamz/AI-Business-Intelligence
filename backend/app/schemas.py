@@ -198,6 +198,14 @@ class Diagnosis(BaseModel):
     unit: str = ""
     #: False when the question named a subject this data does not measure.
     measure_matched: bool = True
+    #: Dimension values the question named — Laptop 14, Ibadan.
+    question_entities: list[dict[str, Any]] = []
+    #: Those the comparison is not broken down by, so it cannot speak to them.
+    unaddressed_entities: list[dict[str, Any]] = []
+    #: False when this comparison is about something other than what was asked.
+    #: The UI then leads with the actions instead of showing evidence that
+    #: answers a different question.
+    addresses_question: bool = True
     direction: str
     current: float
     previous: float

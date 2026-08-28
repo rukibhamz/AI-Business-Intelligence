@@ -137,6 +137,16 @@ export interface Diagnosis {
   unit?: string
   /** False when the question named a subject this data does not measure. */
   measure_matched?: boolean
+  /** Dimension values the question named — "Laptop 14", "Ibadan". */
+  question_entities?: { field: string; label: string }[]
+  /** Those the comparison is not broken down by, so it cannot speak to them. */
+  unaddressed_entities?: { field: string; label: string }[]
+  /**
+   * False when the comparison is about something other than what was asked.
+   * The evidence card is hidden and the actions lead instead — showing a
+   * confident breakdown of a different question is how a reader is misled.
+   */
+  addresses_question?: boolean
   direction: 'up' | 'down' | 'flat'
   current: number
   previous: number

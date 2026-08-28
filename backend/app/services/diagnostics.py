@@ -23,7 +23,6 @@ import re
 from typing import Any
 
 from app.services.analytics import (
-    DIMENSION_FIELDS,
     Dataset,
     TimeIndex,
     bucket_totals,
@@ -241,6 +240,48 @@ def is_speculative(question: str | None) -> bool:
     return any(re.search(p, q) for p in _SPECULATIVE_PATTERNS)
 
 
+#: How many distinct values a dimension may hold before scanning it for names
+#: mentioned in the question stops being worth the pass.
+_MAX_ENTITY_VALUES = 400
+
+
+def named_entities(dataset: Dataset, question: str | None) -> list[dict[str, str]]:
+    """Dimension values the question names — Laptop 14, Ibadan, CourierPlus.
+
+    These are values in the data, not columns, so the canonical mapping cannot
+    see them: "laptop" matches no column name and no field name. But a question
+    that names one is asking about *that thing*, and an answer computed across
+    everything is not an answer to it.
+    """
+    subject = question_subject_words(question)
+    if not subject:
+        return []
+
+    found: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for canonical in dataset.dimensions():
+        column = dataset.column_for(canonical)
+        if not column:
+            continue
+        values: set[str] = set()
+        for row in dataset.rows:
+            raw = row.get(column)
+            label = str(raw).strip() if raw is not None else ""
+            if label:
+                values.add(label)
+            if len(values) > _MAX_ENTITY_VALUES:
+                values = set()
+                break
+        for label in values:
+            # A value is named when the question uses one of its own words:
+            # "laptop" names "Laptop 14", "ibadan" names "Ibadan".
+            words = {w for w in re.split(r"[\s_\-]+", label.lower()) if len(w) > 2}
+            if words & subject and label.lower() not in seen:
+                seen.add(label.lower())
+                found.append({"field": canonical, "label": label})
+    return found
+
+
 def asks_about_margin(*questions: str | None) -> bool:
     return any(
         any(w in f" {q.lower()} " for w in _MARGIN_WORDS) for q in questions if q
@@ -411,7 +452,7 @@ def attribute_ratio_change(
     if total_now == 0 or total_before == 0:
         return None
 
-    for canonical in DIMENSION_FIELDS:
+    for canonical in dataset.dimensions():
         column = dataset.column_for(canonical)
         if not column:
             continue
@@ -507,7 +548,7 @@ def attribute_change(
     """
     best: dict[str, Any] | None = None
 
-    for canonical in DIMENSION_FIELDS:
+    for canonical in dataset.dimensions():
         column = dataset.column_for(canonical)
         if not column:
             continue
@@ -886,6 +927,16 @@ def diagnose(
     else:
         attribution = attribute_change(dataset, index, spec.column, current_key, previous_key)
 
+    # A question naming Laptop 14 in Ibadan is not answered by revenue across
+    # every region. The comparison here is workspace-wide, so it addresses such
+    # a question only when everything it named turns up among the segments the
+    # movement was attributed to.
+    entities = named_entities(dataset, question)
+    driver_labels = {
+        str(d["label"]).lower() for d in (attribution["drivers"] if attribution else [])
+    }
+    unaddressed = [e for e in entities if e["label"].lower() not in driver_labels]
+
     factors: list[dict[str, Any]] = []
     for factor in (
         _coverage_factor(index, current_key, previous_key),
@@ -911,6 +962,12 @@ def diagnose(
         "measure_kind": spec.kind,
         "unit": spec.unit,
         "measure_matched": spec.matched,
+        "question_entities": entities,
+        "unaddressed_entities": unaddressed,
+        #: False when this comparison is about something broader, or other,
+        #: than what was asked. The caller leads with actions instead of
+        #: presenting evidence that answers a different question.
+        "addresses_question": bool(spec.matched) and not unaddressed,
         "direction": direction,
         "current": round(current, 2),
         "previous": round(previous, 2),
@@ -1006,8 +1063,16 @@ def render_diagnosis(diagnosis: dict[str, Any], *, source_name: str | None = Non
     for factor in diagnosis.get("factors", [])[:2]:
         sentences.append(factor["detail"])
 
+    unaddressed = diagnosis.get("unaddressed_entities") or []
     if not diagnosis.get("measure_matched", True):
         sentences.insert(0, UNMEASURED_PREFIX)
+    elif unaddressed:
+        named = ", ".join(e["label"] for e in unaddressed)
+        sentences.insert(
+            0,
+            f"This data is not broken down by {named}, so it cannot answer that "
+            "question at the level you asked. Across the whole dataset:",
+        )
 
     return " ".join(sentences)
 
@@ -1078,6 +1143,24 @@ def build_recommendations(diagnosis: dict[str, Any]) -> list[dict[str, str]]:
                 f"{measure} was used as the headline figure instead.",
                 "now",
                 kind="coverage_gap",
+            )
+        )
+
+    unaddressed = diagnosis.get("unaddressed_entities") or []
+    if unaddressed and diagnosis.get("measure_matched", True):
+        named = ", ".join(e["label"] for e in unaddressed)
+        fields = ", ".join(sorted({e["field"].lower() for e in unaddressed}))
+        out.append(
+            _recommendation(
+                f"Break {measure} down by {fields} to answer this",
+                f"You asked about {named}, and the connected data is not analysed at "
+                f"that level — so nothing below is about {named} specifically. Map or "
+                f"add the {fields} column on this source, or ask for {measure} by "
+                f"{fields} directly, and the same analysis will run scoped to it.",
+                f"{measure.capitalize()} was compared across the whole dataset, "
+                f"not for {named}.",
+                "now",
+                kind="scope_gap",
             )
         )
 
@@ -1343,6 +1426,15 @@ def build_evidence_prompt(
             "saying plainly that the data cannot answer the question that was "
             "asked, and must not imply the figures below are about that subject."
         )
+    unaddressed = diagnosis.get("unaddressed_entities") or []
+    if unaddressed:
+        named = ", ".join(f"{e['label']} ({e['field']})" for e in unaddressed)
+        lines.append(
+            f"IMPORTANT: the question names {named}, and NOTHING BELOW is broken "
+            "down that way — this comparison is across the whole dataset. You have "
+            "no figure for those, so do not state one. Say plainly that the data "
+            "as connected cannot answer the question at that level of detail."
+        )
     if unit == "%":
         lines.append(
             "This measure is a RATE, computed from each period's totals. It moves in "
@@ -1575,7 +1667,7 @@ def build_partial_context(
 
     breakdown: dict[str, Any] | None = None
     if measure_col:
-        for canonical in DIMENSION_FIELDS:
+        for canonical in dataset.dimensions():
             column = dataset.column_for(canonical)
             if not column:
                 continue

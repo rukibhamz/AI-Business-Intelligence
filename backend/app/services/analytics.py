@@ -42,6 +42,18 @@ DIMENSION_FIELDS = (
     "Status",
 )
 
+#: Curated fields that can be totalled. Rates and levels are deliberately
+#: absent: summing a margin or a stock level produces a number that means
+#: nothing.
+MEASURE_FIELDS = (
+    "Revenue",
+    "Profit",
+    "Cost",
+    "Quantity",
+    "Marketing Spend",
+    "Discount",
+)
+
 _DATE_PATTERNS = (
     "%Y-%m-%d",
     "%Y/%m/%d",
@@ -168,15 +180,24 @@ class Dataset:
     total: int
     truncated: bool
     mapping: dict[str, str] = field(default_factory=dict)
+    #: Memo for `_inference`; classifying costs a pass over the rows.
+    _inferred_cache: tuple[dict[str, str], dict[str, str]] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     @property
     def canonical(self) -> dict[str, list[str]]:
         out: dict[str, list[str]] = {}
-        for column, canon in self.mapping.items():
+        for column, canon in self.effective_mapping.items():
             if canon in ("Unmapped", "Ignore") or column not in self.columns:
                 continue
             out.setdefault(canon, []).append(column)
         return out
+
+    @property
+    def effective_mapping(self) -> dict[str, str]:
+        """The confirmed mapping, plus fields inferred for what it left out."""
+        return {**self.mapping, **self._inference()[0]}
 
     def column_for(self, *canonicals: str) -> str | None:
         index = self.canonical
@@ -191,6 +212,52 @@ class Dataset:
 
     def sum_of(self, column: str) -> float:
         return sum(self.numbers(column))
+
+    # --- vocabulary -------------------------------------------------------
+    #
+    # The curated fields below carry meaning the data cannot supply — "Revenue"
+    # is money earned, not merely a number — so they are always preferred. But a
+    # dataset whose columns fall outside the list is not therefore unanalysable:
+    # `field_inference` classifies the leftovers from their values, and those
+    # fields join the vocabulary here rather than being ignored.
+
+    def _inference(self) -> tuple[dict[str, str], dict[str, str]]:
+        """({column: field}, {field: role}), computed once per dataset."""
+        from app.services.field_inference import infer_fields
+
+        if self._inferred_cache is None:
+            self._inferred_cache = infer_fields(self.columns, self.rows, self.mapping)
+        return self._inferred_cache
+
+    @property
+    def inferred(self) -> dict[str, str]:
+        """{field name: role} for columns the curated vocabulary did not name."""
+        return self._inference()[1]
+
+    def dimensions(self) -> tuple[str, ...]:
+        """Fields this dataset can be grouped by, curated ones first.
+
+        Curated first so a chart or an attribution reaches for Region before
+        Shipping Zone when a dataset carries both — the named concept is the one
+        a reader expects to see.
+        """
+        present = [c for c in DIMENSION_FIELDS if self.column_for(c)]
+        extra = [
+            name
+            for name, role in self.inferred.items()
+            if role == "dimension" and self.column_for(name)
+        ]
+        return tuple(present + extra)
+
+    def measures(self) -> tuple[str, ...]:
+        """Fields this dataset can total. Rates are excluded: never sum a rate."""
+        present = [c for c in MEASURE_FIELDS if self.column_for(c)]
+        extra = [
+            name
+            for name, role in self.inferred.items()
+            if role == "measure" and self.column_for(name)
+        ]
+        return tuple(present + extra)
 
 
 async def load_dataset(source: DataSource, *, limit: int = MAX_ROWS) -> Dataset:
@@ -1058,7 +1125,7 @@ def build_overview(dataset: Dataset) -> dict[str, Any]:
     measure_col = revenue_col or profit_col or quantity_col
     measure_label = "Revenue" if revenue_col else ("Profit" if profit_col else "Units")
 
-    dimension_cols = [(canon, dataset.column_for(canon)) for canon in DIMENSION_FIELDS]
+    dimension_cols = [(canon, dataset.column_for(canon)) for canon in dataset.dimensions()]
     dimension_cols = [(canon, col) for canon, col in dimension_cols if col]
 
     for canon, col in dimension_cols[:2]:
@@ -1228,7 +1295,7 @@ def explain_change(
     index: TimeIndex,
     measure: str,
     *,
-    dimensions: tuple[str, ...] = DIMENSION_FIELDS,
+    dimensions: tuple[str, ...] | None = None,
     max_drivers: int = 2,
 ) -> str | None:
     """Name the segments that moved a measure between the last two periods.
@@ -1246,7 +1313,7 @@ def explain_change(
 
     best: tuple[float, str, list[str]] | None = None
 
-    for canonical in dimensions:
+    for canonical in dimensions if dimensions is not None else dataset.dimensions():
         column = dataset.column_for(canonical)
         if not column:
             continue
@@ -1377,7 +1444,7 @@ def build_findings(dataset: Dataset) -> list[dict[str, Any]]:
     # 2. Concentration and spread across the strongest dimension.
     dimension_col: str | None = None
     dimension_name: str | None = None
-    for canon in DIMENSION_FIELDS:
+    for canon in dataset.dimensions():
         col = dataset.column_for(canon)
         if col:
             dimension_col, dimension_name = col, canon
@@ -1728,7 +1795,7 @@ def build_findings(dataset: Dataset) -> list[dict[str, Any]]:
         overall_margin = _safe_div(overall_profit, overall_revenue)
         widest: tuple[float, str, dict[str, Any], dict[str, Any]] | None = None
 
-        for canon in DIMENSION_FIELDS:
+        for canon in dataset.dimensions():
             column = dataset.column_for(canon)
             if not column:
                 continue
